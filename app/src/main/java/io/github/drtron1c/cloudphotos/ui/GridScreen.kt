@@ -192,8 +192,8 @@ fun PhotoGrid(
                                     }
                                 } while (event.changes.any { it.pressed })
                                 if (pinching) {
-                                    if (zoom > 1.2f && levelNow > 0) vm.setGridLevel(levelNow - 1)
-                                    else if (zoom < 0.83f && levelNow < options.lastIndex) vm.setGridLevel(levelNow + 1)
+                                    if (zoom > 1.2f && levelNow > 0) vm.changeGridLevel(levelNow - 1)
+                                    else if (zoom < 0.83f && levelNow < options.lastIndex) vm.changeGridLevel(levelNow + 1)
                                 }
                             }
                         },

@@ -94,14 +94,14 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             Group("Privacy", footer = "Uses your fingerprint, face unlock or screen-lock PIN.") {
                 ToggleRow("Lock Cloud Photos", "Ask to unlock every time you open the app", vm.lockApp) { on ->
                     if (activity != null && on) {
-                        activity.requireUnlock("Turn on app lock") { vm.setLockApp(true) }
-                    } else vm.setLockApp(on)
+                        activity.requireUnlock("Turn on app lock") { vm.changeLockApp(true) }
+                    } else vm.changeLockApp(on)
                 }
                 Divider()
                 ToggleRow("Lock Hidden & Recently Deleted", "Like Face ID for these albums on iPhone", vm.lockPrivateAlbums) { on ->
                     if (activity != null && !on) {
-                        activity.requireUnlock("Turn off album lock") { vm.setLockPrivateAlbums(false) }
-                    } else vm.setLockPrivateAlbums(on)
+                        activity.requireUnlock("Turn off album lock") { vm.changeLockPrivateAlbums(false) }
+                    } else vm.changeLockPrivateAlbums(on)
                 }
             }
 

@@ -458,7 +458,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun share(assets: List<Asset>, launch: (Intent) -> Unit) {
+    fun share(assets: List<Asset>, onReady: (Intent) -> Unit) {
         if (assets.isEmpty()) return
         viewModelScope.launch {
             try {
@@ -468,7 +468,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 busy = null
                 expectingExternal = true
-                launch(Intent.createChooser(intent, null))
+                onReady(Intent.createChooser(intent, null))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -510,17 +510,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- settings ----------------
 
-    fun setGridLevel(level: Int) {
+    fun changeGridLevel(level: Int) {
         gridLevel = level
         prefs.edit().putInt(PREF_GRID, level).apply()
     }
 
-    fun setLockApp(on: Boolean) {
+    fun changeLockApp(on: Boolean) {
         lockApp = on
         prefs.edit().putBoolean(PREF_LOCK_APP, on).apply()
     }
 
-    fun setLockPrivateAlbums(on: Boolean) {
+    fun changeLockPrivateAlbums(on: Boolean) {
         lockPrivateAlbums = on
         prefs.edit().putBoolean(PREF_LOCK_PRIVATE, on).apply()
     }
