@@ -148,8 +148,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            if (e is UnknownHostException) phase = Phase.Failed(friendly(e))
-            else phase = Phase.Login(graph.authState.appleId, friendly(e))
+            phase = if (e is IOException && e !is SessionExpiredException) {
+                Phase.Failed(if (e is UnknownHostException) friendly(e) else "Couldn't reach iCloud: ${friendly(e)}")
+            } else {
+                Phase.Login(graph.authState.appleId, friendly(e))
+            }
         }
     }
 

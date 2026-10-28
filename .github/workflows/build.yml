@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned: the Ubuntu 26 image behind ubuntu-latest broke the Android SDK setup action.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +25,19 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # The 24.04 image ships an Android SDK already; this action only tops it up.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        continue-on-error: true
+
+      - name: Record build environment
+        run: |
+          {
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            ls "$ANDROID_HOME" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" 2>&1
+            java -version 2>&1
+          } > env.log
+          cat env.log
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -74,7 +86,7 @@ jobs:
           mkdir -p /tmp/ci && cd /tmp/ci
           git init -q -b ci-logs
           echo "${{ job.status }} run=${{ github.run_number }} sha=${{ github.sha }}" > status.txt
-          cp "$GITHUB_WORKSPACE"/build.log . 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE"/build.log "$GITHUB_WORKSPACE"/env.log . 2>/dev/null || true
           cp "$GITHUB_WORKSPACE"/badging.txt . 2>/dev/null || true
           cp "$GITHUB_WORKSPACE"/CloudPhotos.apk . 2>/dev/null || true
           grep -nE "^e: |^w: .*(deprecated|unused)|error:|FAILED|What went wrong|Could not|expected:|AssertionError" build.log > errors.txt 2>/dev/null || true

@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,22 +67,29 @@ import io.github.drtron1c.cloudphotos.auth.CodeDelivery
 @Composable
 private fun CenteredColumn(content: @Composable () -> Unit) {
     val p = LocalPalette.current
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(p.groupedBackground)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .imePadding()
-            .verticalScroll(rememberScrollState()),
-        contentAlignment = Alignment.Center,
     ) {
         Column(
             Modifier
-                .widthIn(max = 440.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 28.dp, vertical = 32.dp),
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight),
             horizontalAlignment = Alignment.CenterHorizontally,
-        ) { content() }
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Column(
+                Modifier
+                    .widthIn(max = 440.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 28.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) { content() }
+        }
     }
 }
 
@@ -195,6 +204,7 @@ fun TwoFactorScreen(state: Phase.TwoFactor, vm: MainViewModel) {
     var showOptions by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(state.error) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(state.busy) { if (!state.busy && state.error != null) code = "" }
 
     CenteredColumn {
         Row(Modifier.fillMaxWidth()) {

@@ -309,7 +309,11 @@ class AppleAuth(
     /** Try to continue the saved session without asking for anything. */
     suspend fun resume(): Boolean {
         if (state.dsid != null) {
-            val r = runCatching { http.send("POST", "$SETUP/validate?${setupParams()}", rawBody = "null") }.getOrNull()
+            val r = try {
+                http.send("POST", "$SETUP/validate?${setupParams()}", rawBody = "null")
+            } catch (e: java.io.IOException) {
+                throw e // offline: keep the saved session and let the caller offer a retry
+            }
             val j = r?.json()
             if (r != null && r.ok && j != null && j.has("webservices")) {
                 applyAccountData(j)

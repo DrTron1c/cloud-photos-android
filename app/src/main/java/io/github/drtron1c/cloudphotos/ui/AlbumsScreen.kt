@@ -174,8 +174,8 @@ fun AlbumTile(vm: MainViewModel, spec: AlbumSpec, size: Dp, onClick: () -> Unit)
     val context = LocalContext.current
     val list = vm.list(spec)
     val count = list.count
-    LaunchedEffect(count) { if (count > 0) list.ensure(count - 1) }
     val cover = if (count > 0) list[count - 1] else null
+    LaunchedEffect(count, cover == null) { if (count > 0) list.ensure(count - 1) }
     Column(Modifier.width(size).clickable(onClick = onClick)) {
         Box(
             Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(p.placeholder),

@@ -173,7 +173,7 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
                 val asset = list[page]
-                LaunchedEffect(page) { list.ensure(page) }
+                LaunchedEffect(page, asset == null) { list.ensure(page) }
                 when {
                     asset == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)

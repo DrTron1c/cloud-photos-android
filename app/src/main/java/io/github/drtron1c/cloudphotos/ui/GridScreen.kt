@@ -200,7 +200,7 @@ fun PhotoGrid(
                 ) {
                     items(count = count, key = { it }) { index ->
                         val asset = list[index]
-                        LaunchedEffect(index) { list.ensure(index) }
+                        LaunchedEffect(index, asset == null) { list.ensure(index) }
                         GridCell(
                             vm = vm,
                             asset = asset,
