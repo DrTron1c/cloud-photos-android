@@ -1,0 +1,58 @@
+package io.github.drtron1c.cloudphotos
+
+import android.app.Application
+import android.content.Context
+import coil3.ImageLoader
+import coil3.disk.DiskCache
+import coil3.disk.directory
+import coil3.memory.MemoryCache
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.crossfade
+import coil3.video.VideoFrameDecoder
+import io.github.drtron1c.cloudphotos.auth.AppleAuth
+import io.github.drtron1c.cloudphotos.net.AuthState
+import io.github.drtron1c.cloudphotos.net.PersistentCookieJar
+import io.github.drtron1c.cloudphotos.net.SecureFile
+import io.github.drtron1c.cloudphotos.net.buildHttpClient
+import io.github.drtron1c.cloudphotos.photos.MediaActions
+import io.github.drtron1c.cloudphotos.photos.PhotosApi
+import java.io.File
+
+class CloudPhotosApp : Application() {
+    lateinit var graph: AppGraph
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        graph = AppGraph(this)
+    }
+}
+
+/** Long-lived objects shared by the whole app. */
+class AppGraph(context: Context) {
+    val authState = AuthState(SecureFile(File(context.filesDir, "session.bin")))
+    val cookieJar = PersistentCookieJar(SecureFile(File(context.filesDir, "cookies.bin")))
+    val http = buildHttpClient(cookieJar, authState)
+    val auth = AppleAuth(http, authState, cookieJar)
+
+    /** Set by the UI layer: how to recover when CloudKit says the session is gone. */
+    @Volatile var reauthHandler: suspend () -> Boolean = { false }
+    val photos = PhotosApi(http, authState) { reauthHandler() }
+    val media = MediaActions(context, http)
+    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    val imageLoader: ImageLoader = ImageLoader.Builder(context)
+        .components {
+            add(OkHttpNetworkFetcherFactory(callFactory = http))
+            add(VideoFrameDecoder.Factory())
+        }
+        .memoryCache { MemoryCache.Builder().maxSizePercent(context, 0.25).build() }
+        .diskCache {
+            DiskCache.Builder()
+                .directory(File(context.cacheDir, "images"))
+                .maxSizeBytes(1536L * 1024 * 1024)
+                .build()
+        }
+        .crossfade(120)
+        .build()
+}
