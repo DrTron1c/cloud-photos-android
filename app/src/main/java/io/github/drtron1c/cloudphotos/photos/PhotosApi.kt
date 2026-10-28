@@ -179,7 +179,7 @@ class PhotosApi(
                 val fresh = lookupTag(asset.assetRecordName) ?: throw PhotosApiException("This item changed on another device. Pull to refresh and try again.")
                 return updateAsset(asset, fields, fresh, retried = true)
             }
-            throw PhotosApiException(rec.optString("reason").ifEmpty { "iCloud refused the change ($err)." })
+            throw PhotosApiException(rec?.optString("reason")?.ifEmpty { null } ?: "iCloud refused the change ($err).")
         }
         return rec?.optString("recordChangeTag")?.ifEmpty { null } ?: tag
     }

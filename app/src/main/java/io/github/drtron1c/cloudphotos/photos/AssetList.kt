@@ -82,6 +82,18 @@ class AssetList(
         }
     }
 
+    /** Cheap check (one count query); reloads only if the album changed size. */
+    fun checkForChanges() {
+        if (count < 0 || refreshing) return
+        scope.launch {
+            try {
+                val n = api.count(spec)
+                if (n != count) refresh()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
     /** Make sure [index] (and its neighbours) are loaded and their download links are fresh. */
     fun ensure(index: Int) {
         val c = count
