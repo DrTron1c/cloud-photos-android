@@ -72,21 +72,17 @@ if [ -f "$TEST" ]; then
   adb install -r "$APPT" 2>&1 | tee $OUT/test-app-install.txt
   adb install -r "$TEST" 2>&1 | tee $OUT/test-install.txt
   adb logcat -d -b crash > $OUT/crash-before-device-test.txt
+  # The on-device test installs its own companion (signed with the device key) in its place.
+  adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
   adb logcat -c
   timeout 240 adb shell am instrument -r -w \
     io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
   echo "exit=$?" >> $OUT/device-test.txt
   adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err" | tail -150 > $OUT/device-test-logcat.txt
-  adb pull /sdcard/Android/data/io.github.drtron1c.cloudphotos/files/device-made.apk $OUT/device-made.apk 2>&1 | tail -1
-  if [ -f $OUT/device-made.apk ]; then
-    adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
-    adb install -r $OUT/device-made.apk 2>&1 | tee $OUT/device-made-install.txt
-    adb shell input keyevent KEYCODE_HOME; sleep 2
-    adb shell input swipe 540 2000 540 600 300; sleep 3
-    shot 9-app-drawer-device-made
-    adb shell input keyevent KEYCODE_HOME
-    rm -f $OUT/device-made.apk
-  fi
+  adb shell input keyevent KEYCODE_HOME; sleep 2
+  adb shell input swipe 540 2000 540 600 300; sleep 3
+  shot 9-app-drawer-device-made
+  adb shell input keyevent KEYCODE_HOME
 fi
 
 adb logcat -d -b crash > $OUT/crash.txt

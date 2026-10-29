@@ -20,8 +20,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 
 /**
  * Runs on a real Android device / emulator: makes a companion app exactly as the app does,
@@ -32,7 +30,8 @@ import java.nio.file.StandardCopyOption;
 public class CompanionOnDeviceTest {
     @Test
     public void makesSignedCompanionWithKeystoreKey() throws Exception {
-        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Instrumentation inst = InstrumentationRegistry.getInstrumentation();
+        Context ctx = inst.getTargetContext();
         Bitmap src = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888);
         src.eraseColor(0xFFE91E63);
         Bitmap icon = IconArt.INSTANCE.render(src, 1.5f, 10f, -5f, 600f);
@@ -51,9 +50,22 @@ public class CompanionOnDeviceTest {
                 result.getSignerCertificates().get(0).getEncoded(),
                 second.getSignerCertificates().get(0).getEncoded()));
 
-        // For the CI smoke test to install.
-        File out = new File(ctx.getExternalFilesDir(null), "device-made.apk");
-        Files.copy(again.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        // Install it through the app's own installer code. The test borrows the shell's install
+        // permission so no one has to tap "Install" on the emulator.
+        inst.getUiAutomation().adoptShellPermissionIdentity(android.Manifest.permission.INSTALL_PACKAGES);
+        try {
+            CustomLauncher.INSTANCE.install(ctx, again);
+            String label = null;
+            for (int i = 0; i < 60 && !"Made On Device 2".equals(label); i++) {
+                Thread.sleep(500);
+                label = CustomLauncher.INSTANCE.installedLabel(ctx);
+            }
+            Log.i("CompanionTest", "INSTALLED_LABEL=" + label);
+            assertTrue("installed label was " + label, "Made On Device 2".equals(label));
+            assertTrue(CustomLauncher.INSTANCE.canUpdateInstalled(ctx));
+        } finally {
+            inst.getUiAutomation().dropShellPermissionIdentity();
+        }
     }
 
     /**
