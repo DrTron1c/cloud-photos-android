@@ -60,6 +60,15 @@ class MemoryMakerTest {
     }
 
     @Test
+    fun everyCoverIsOneOfItsOwnPhotos() {
+        // Lots of favourites, so not every one can make it into a memory.
+        val lib = library() + (0 until 300).map { k -> photo(LocalDate.of(2025, 8, 2).atTime(8, 0).plusMinutes(k.toLong()), 37.98, 23.73, fav = true) }
+        val ms = MemoryMaker.make(lib, today, zone, geo)
+        assertTrue(ms.isNotEmpty())
+        for (m in ms) assertTrue("${m.title}: cover ${m.cover} isn't one of its photos", m.cover in m.ids)
+    }
+
+    @Test
     fun pickSpreadsOutAndKeepsFavourites() {
         val group = (0 until 300).map { photo(LocalDateTime.of(2025, 1, 1, 0, 0).plusMinutes(it * 10L), fav = it % 50 == 0) }
         val picked = MemoryMaker.pick(group, 45)

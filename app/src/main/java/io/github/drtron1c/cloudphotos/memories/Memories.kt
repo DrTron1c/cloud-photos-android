@@ -55,7 +55,8 @@ object MemoryMaker {
         fun memory(id: String, title: String, subtitle: String, kind: String, group: List<IndexEntry>): Memory? {
             val picked = pick(group, MAX_PHOTOS)
             if (picked.isEmpty()) return null
-            val cover = group.filter { it.favourite }.maxByOrNull { it.date } ?: picked[picked.size / 3]
+            // The cover is always one of the memory's own photos.
+            val cover = picked.filter { it.favourite }.maxByOrNull { it.date } ?: picked[picked.size / 3]
             return Memory(id, title, subtitle, kind, picked.map { it.id }, cover.id, group.first().date)
         }
 

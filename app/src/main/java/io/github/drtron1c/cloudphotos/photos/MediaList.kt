@@ -102,10 +102,13 @@ class SubsetList(
     private val base: MediaList,
     positions: List<Int>,
     ids: List<String>,
+    /** Called when a photo isn't where it was expected (the library changed since the index was made). */
+    private val onMoved: () -> Unit = {},
 ) : MediaList {
     private val pos = positions.toMutableList()
     private val idList = ids.toMutableList()
     private var version by mutableIntStateOf(0)
+    private var reported = false
 
     override val count: Int get() = if (version >= 0) idList.size else 0
     override val refreshing: Boolean get() = base.refreshing
@@ -118,7 +121,14 @@ class SubsetList(
         val j = base.indexOf(id)
         if (j >= 0) {
             pos[index] = j
-            return base[j]
+            return base[j]?.takeIf { it.id == id }
+        }
+        if (a != null) {
+            // Something else is in its place: never show the neighbour. Load around it and let the
+            // owner rebuild its index.
+            if (!reported) { reported = true; onMoved() }
+            val c = base.count
+            for (d in intArrayOf(-150, 150, -300, 300)) { val q = pos[index] + d; if (q in 0 until c) base.ensure(q) }
         }
         return null
     }

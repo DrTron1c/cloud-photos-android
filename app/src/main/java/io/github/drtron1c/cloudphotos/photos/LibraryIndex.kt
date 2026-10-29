@@ -68,6 +68,8 @@ class LibraryIndex(
 
     private var zone = ""
     private var job: Job? = null
+    /** Whether the cached copy has been compared with iCloud this session. */
+    private var checked = false
 
     private fun file(z: String) = SecureFile(File(dir, "index-" + z.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".bin"))
 
@@ -79,19 +81,28 @@ class LibraryIndex(
         entries = emptyList()
         ready = false
         building = false
+        checked = false
         scope.launch {
             val cached = withContext(Dispatchers.IO) { readCached(dir, z) }
-            if (zone == z && cached != null) {
+            // Never put an older cached copy over a fresh one that finished first.
+            if (zone == z && cached != null && entries.isEmpty()) {
                 entries = cached
                 ready = true
             }
         }
     }
 
-    /** Bring the index up to date with a library of [count] items. */
-    fun sync(count: Int) {
+    /**
+     * Bring the index up to date with a library of [count] items. [force] rebuilds it even when the
+     * count matches (photos were added and others removed elsewhere, so positions moved).
+     */
+    fun sync(count: Int, force: Boolean = false) {
         if (count < 0 || building) return
-        if (ready && entries.size == count) return
+        if (!force && ready && entries.size == count) {
+            if (!checked) check(count)
+            return
+        }
+        checked = true
         val z = zone
         building = true
         error = null
@@ -138,6 +149,26 @@ class LibraryIndex(
             } finally {
                 building = false
             }
+        }
+    }
+
+    /**
+     * The same number of photos doesn't mean the same photos: compare a few pages of the cached
+     * copy (newest, middle, oldest) with iCloud, and rebuild if anything moved.
+     */
+    private fun check(count: Int) {
+        checked = true
+        val z = zone
+        val cached = entries
+        scope.launch {
+            val moved = runCatching {
+                val starts = listOf(0, (count / 2 / 100) * 100, maxOf(0, count - 100)).distinct()
+                starts.any { start ->
+                    val page = api.indexPage(start)
+                    page.withIndex().any { (i, a) -> start + i < cached.size && cached[start + i].id != a.id }
+                }
+            }.getOrDefault(false)
+            if (moved && zone == z && entries === cached) sync(count, force = true)
         }
     }
 

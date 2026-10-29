@@ -557,6 +557,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             base = lib,
             positions = ordered.map { lib.positionOfRank(it.index) },
             ids = ordered.map { it.value.id },
+            onMoved = { viewModelScope.launch { indexOutOfStep() } },
         )
         lists[list.key] = list
         return list
@@ -1198,12 +1199,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return c.second[id]
     }
 
-    /** The library item with this id (loads its page if needed; null until it arrives). */
+    /** Photos found away from where the index put them, until the index is rebuilt. */
+    private var movedCache: Pair<List<IndexEntry>, HashMap<String, Asset>>? = null
+    private var lastIndexRebuild = 0L
+
+    /**
+     * The library item with this id (loads its page if needed; null until it arrives). Only ever
+     * the photo with exactly this id: covers and Similar Photos' clean-up depend on it.
+     */
     fun assetFor(id: String): Asset? {
         val lib = library() ?: return null
         val rank = rankOf(id) ?: return null
         val pos = lib.positionOfRank(rank)
-        return lib[pos] ?: run { lib.ensure(pos); null }
+        val a = lib[pos]
+        if (a != null && a.id == id) return a
+        // Photos were added or removed since the index was made, so something else sits in its
+        // place. Look among what's loaded, load around it, and rebuild the index.
+        val e = index.entries
+        val moved = movedCache?.takeIf { it.first === e }?.second ?: HashMap<String, Asset>().also { movedCache = e to it }
+        moved[id]?.let { return it }
+        val j = lib.indexOf(id)
+        if (j >= 0) lib[j]?.takeIf { it.id == id }?.let { moved[id] = it; return it }
+        if (a == null) { lib.ensure(pos); return null }
+        viewModelScope.launch { indexOutOfStep() }
+        val c = lib.count
+        for (d in intArrayOf(-150, 150, -300, 300)) { val q = pos + d; if (q in 0 until c) lib.ensure(q) }
+        return null
+    }
+
+    /** The index no longer matches the library's order: rebuild it (at most every few minutes). */
+    private fun indexOutOfStep() {
+        val lib = library() ?: return
+        val now = System.currentTimeMillis()
+        if (index.building || lib.count <= 0 || now - lastIndexRebuild < 3 * 60_000) return
+        lastIndexRebuild = now
+        index.sync(lib.count, force = true)
     }
 
     /** A grid of these photos: in this order ([keepOrder]) or the library's. */
