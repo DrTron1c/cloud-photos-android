@@ -19,8 +19,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // On-device tests run against the real (shrunk) release build.
-    testBuildType = "release"
+    // On-device tests run against a shrunk build identical to release (plus the Kotlin
+    // library the test framework needs).
+    testBuildType = "releaseTest"
 
     signingConfigs {
         create("shared") {
@@ -43,6 +44,11 @@ android {
         }
         debug {
             signingConfig = signingConfigs.getByName("shared")
+        }
+        create("releaseTest") {
+            initWith(getByName("release"))
+            proguardFile("test-app-rules.pro")
+            matchingFallbacks += listOf("release")
         }
     }
 

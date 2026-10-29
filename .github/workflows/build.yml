@@ -46,7 +46,7 @@ jobs:
 
       - name: Unit tests + release APK
         run: |
-          gradle --no-daemon --stacktrace --continue :app:testReleaseUnitTest :app:assembleRelease :app:assembleReleaseAndroidTest 2>&1 | tee build.log
+          gradle --no-daemon --stacktrace --continue :app:testReleaseUnitTest :app:assembleRelease :app:assembleReleaseTest :app:assembleReleaseTestAndroidTest 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
       - name: Inspect APK
@@ -68,7 +68,8 @@ jobs:
           path: |
             CloudPhotos.apk
             app/build/launcher-test/CustomLauncher.apk
-            app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            app/build/outputs/apk/releaseTest/app-releaseTest.apk
+            app/build/outputs/apk/androidTest/releaseTest/app-releaseTest-androidTest.apk
           if-no-files-found: error
 
       # A rolling "latest" release makes the APK one tap to download on the tablet.

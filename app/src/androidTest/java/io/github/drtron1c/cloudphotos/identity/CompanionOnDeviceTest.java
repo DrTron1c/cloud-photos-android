@@ -2,8 +2,14 @@ package io.github.drtron1c.cloudphotos.identity;
 
 import static org.junit.Assert.assertTrue;
 
+import android.app.Activity;
+import android.app.Instrumentation;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.util.Log;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -48,5 +54,28 @@ public class CompanionOnDeviceTest {
         // For the CI smoke test to install.
         File out = new File(ctx.getExternalFilesDir(null), "device-made.apk");
         Files.copy(again.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /**
+     * Records what Android does to the open app when its launcher entry is switched off
+     * (this decides whether "hide the original icon" can happen right away).
+     */
+    @Test
+    public void recordsWhatHappensWhenOpenEntryIsDisabled() throws Exception {
+        Instrumentation inst = InstrumentationRegistry.getInstrumentation();
+        Context ctx = inst.getTargetContext();
+        String pkg = ctx.getPackageName();
+        ComponentName alias = new ComponentName(pkg, pkg + ".alias.CloudPhotos");
+        PackageManager pm = ctx.getPackageManager();
+        Intent open = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(alias).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = inst.startActivitySync(open);
+        Thread.sleep(2000);
+        pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+        Thread.sleep(4000);
+        boolean closed = activity.isFinishing() || activity.isDestroyed();
+        Log.i("CompanionTest", "DISABLE_OPEN_ALIAS closed_activity=" + closed);
+        pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
+        if (!closed) activity.finish();
     }
 }
