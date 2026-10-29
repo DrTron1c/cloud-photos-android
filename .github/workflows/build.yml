@@ -46,7 +46,7 @@ jobs:
 
       - name: Unit tests + release APK
         run: |
-          gradle --no-daemon --stacktrace --continue :app:testReleaseUnitTest :app:assembleRelease :app:assembleReleaseTest :app:assembleReleaseTestAndroidTest 2>&1 | tee build.log
+          gradle --no-daemon --stacktrace --continue :aicore:test :app:testReleaseUnitTest :app:assembleRelease :app:assembleReleaseTest :app:assembleReleaseTestAndroidTest 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
       - name: Inspect APK

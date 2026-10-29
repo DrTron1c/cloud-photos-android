@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "CloudPhotos"
-include(":app", ":launcher")
+include(":app", ":launcher", ":aicore")
