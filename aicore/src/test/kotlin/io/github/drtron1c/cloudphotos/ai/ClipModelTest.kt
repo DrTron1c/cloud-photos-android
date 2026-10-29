@@ -94,6 +94,27 @@ class ClipModelTest {
     }
 
     @Test
+    fun diagnoseTextModels() {
+        val tok = tokenizer()
+        val cats = pixels(fetchImage("http://images.cocodataset.org/val2017/000000039769.jpg", "cats.jpg"))
+        val phrases = listOf("two cats", "a red hat", "a car", "a dog")
+        for (textFile in listOf("onnx/text_model.onnx", "onnx/text_model_quantized.onnx")) {
+            ClipModel(download("onnx/vision_model.onnx"), download(textFile), tok).use { model ->
+                println("DESCRIBE $textFile\n" + model.describe())
+                val img = model.embedImage(ImagePrep.toChw(cats.first, cats.second, cats.third))
+                for (zero in listOf(true, false)) for (mask in listOf(true, false)) {
+                    model.padWithZero = zero
+                    model.useMask = mask
+                    val t = phrases.associateWith { model.embedText("a photo of $it") }
+                    val cross = "cats·hat=${"%.3f".format(dot(t.getValue("two cats"), t.getValue("a red hat")))}"
+                    println("TEXT $textFile pad0=$zero mask=$mask  $cross  img: " +
+                        t.entries.joinToString("  ") { (p, e) -> "$p=${"%.3f".format(dot(img, e))}" })
+                }
+            }
+        }
+    }
+
+    @Test
     fun picturesMatchTheirWords() {
         val tok = tokenizer()
         val textFile = listOf("onnx/text_model_quantized.onnx", "onnx/text_model.onnx").first { it in files }

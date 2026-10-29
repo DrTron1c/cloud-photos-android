@@ -115,14 +115,31 @@ class ClipModel(visionModel: File, textModel: File, private val tokenizer: ClipT
         }
     }
 
+    /** Input / output names and shapes, for diagnostics. */
+    fun describe(): String = buildString {
+        for ((label, session) in listOf("vision" to vision, "text" to text)) {
+            append(label).append(" in=")
+            append(session.inputInfo.entries.joinToString { "${it.key}:${it.value.info}" })
+            append(" out=")
+            append(session.outputInfo.entries.joinToString { "${it.key}:${it.value.info}" })
+            append('\n')
+        }
+    }
+
+    /** How padding after the end token is filled (0 or the end token itself). */
+    var padWithZero = true
+    var useMask = true
+
     /** Embedding of a search phrase. */
     fun embedText(phrase: String): FloatArray {
-        val ids = tokenizer.encode(phrase)
+        val raw = tokenizer.encode(phrase)
+        val end = raw.indexOfFirst { it == raw.max() }
+        val ids = if (padWithZero) IntArray(raw.size) { if (it <= end) raw[it] else 0 } else raw
         val n = ids.size.toLong()
         val inputs = HashMap<String, OnnxTensor>()
         try {
             for (name in text.inputNames) {
-                val data = if (name.contains("mask")) LongArray(ids.size) { if (it <= ids.indexOfFirst { id -> id == ids.max() }) 1L else 0L }
+                val data = if (name.contains("mask")) LongArray(ids.size) { if (!useMask || it <= end) 1L else 0L }
                 else LongArray(ids.size) { ids[it].toLong() }
                 inputs[name] = OnnxTensor.createTensor(env, LongBuffer.wrap(data), longArrayOf(1, n))
             }
