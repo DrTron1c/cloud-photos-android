@@ -141,7 +141,7 @@ class PhotosApi(
                 if (type == 3L) continue // folder
                 val enc = f.optJSONObject("albumNameEnc")?.optString("value") ?: continue
                 val title = runCatching {
-                    String(android.util.Base64.decode(enc, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                    String(java.util.Base64.getMimeDecoder().decode(enc), Charsets.UTF_8)
                 }.getOrNull() ?: continue
                 all += UserAlbum(name, title)
             }

@@ -12,10 +12,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * A lazily-loaded, position-addressed view of one album. Position 0 is the oldest item,
- * like the iPhone grid (newest at the bottom). Cells ask for their index and the list
- * fetches the surrounding run of items on demand, so huge libraries scroll and scrub
- * without loading everything.
+ * A lazily-loaded, position-addressed view of one album.
+ *
+ * iCloud ranks items newest-first (rank 0 = most recent), and data is stored by rank.
+ * The public index is the *display* position, oldest first like the iPhone grid
+ * (newest at the bottom): index = count - 1 - rank. Cells ask for their index and the
+ * list fetches the surrounding run of items on demand, so huge libraries scroll and
+ * scrub without loading everything.
  */
 class AssetList(
     val spec: AlbumSpec,
@@ -30,16 +33,27 @@ class AssetList(
     var refreshing by mutableStateOf(false)
         private set
 
-    private val items = mutableStateMapOf<Int, Asset>()
     private val loadedAt = HashMap<Int, Long>()
     private val inFlight = HashSet<Int>()
     private val mutex = Mutex()
     private var generation = 0
     private var countJob: Job? = null
 
-    operator fun get(index: Int): Asset? = items[index]
+    private val items = mutableStateMapOf<Int, Asset>() // keyed by rank
 
-    fun indexOf(assetId: String): Int = items.entries.firstOrNull { it.value.id == assetId }?.key ?: -1
+    /** Item at display position [index] (0 = oldest). */
+    operator fun get(index: Int): Asset? {
+        val c = count
+        return if (c <= 0 || index < 0 || index >= c) null else items[c - 1 - index]
+    }
+
+    private fun rankOf(assetId: String): Int = items.entries.firstOrNull { it.value.id == assetId }?.key ?: -1
+
+    /** Display position of an asset, or -1 if it isn't loaded. */
+    fun indexOf(assetId: String): Int {
+        val r = rankOf(assetId)
+        return if (r < 0) -1 else count - 1 - r
+    }
 
     fun start() {
         if (count >= 0 || countJob?.isActive == true) return
@@ -94,19 +108,24 @@ class AssetList(
         }
     }
 
-    /** Make sure [index] (and its neighbours) are loaded and their download links are fresh. */
+    /** Make sure display position [index] (and its neighbours) are loaded with fresh download links. */
     fun ensure(index: Int) {
         val c = count
         if (c <= 0 || index < 0 || index >= c) return
-        val now = System.currentTimeMillis()
-        val have = items[index]
-        val stamp = loadedAt[index] ?: 0L
-        if (have != null && now - stamp < STALE_MS) return
-        if (inFlight.contains(index)) return
+        ensureRank(c - 1 - index)
+    }
 
-        // Start a little before the requested cell so scrolling either way finds data ready.
-        var start = index
-        while (start > 0 && index - start < LOOK_BEHIND && !isFresh(start - 1, now) && !inFlight.contains(start - 1)) start--
+    private fun ensureRank(rank: Int) {
+        val c = count
+        val now = System.currentTimeMillis()
+        val have = items[rank]
+        val stamp = loadedAt[rank] ?: 0L
+        if (have != null && now - stamp < STALE_MS) return
+        if (inFlight.contains(rank)) return
+
+        // Start a little "newer" than the requested cell so scrolling either way finds data ready.
+        var start = rank
+        while (start > 0 && rank - start < LOOK_BEHIND && !isFresh(start - 1, now) && !inFlight.contains(start - 1)) start--
         val end = minOf(c, start + PAGE)
         for (i in start until end) inFlight.add(i)
         val gen = generation
@@ -140,8 +159,8 @@ class AssetList(
 
     /** Replace an item after an edit (favourite etc.). */
     fun update(asset: Asset) {
-        val i = indexOf(asset.id)
-        if (i >= 0) items[i] = asset
+        val r = rankOf(asset.id)
+        if (r >= 0) items[r] = asset
     }
 
     /** Drop items that left this album (deleted, hidden, recovered…) and close the gaps. */

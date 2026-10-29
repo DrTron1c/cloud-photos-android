@@ -85,10 +85,12 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-video:3.0.4")
     implementation("me.saket.telephoto:zoomable-image-coil3:0.14.0")
     implementation("me.saket.telephoto:flick:0.14.0")
+    implementation("me.saket.telephoto:zoomable:0.14.0")
 
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

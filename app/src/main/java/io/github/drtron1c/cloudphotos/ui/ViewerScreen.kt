@@ -1,6 +1,14 @@
 package io.github.drtron1c.cloudphotos.ui
 
 import android.view.ViewGroup
+import android.view.TextureView
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.geometry.Size
+import androidx.media3.common.VideoSize
+import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.ZoomableContentLocation
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -432,20 +440,39 @@ private fun VideoPage(
         }
         if (active) {
             val player = remember(asset.id) { newPlayer(context, vm.http, video.url).apply { playWhenReady = true } }
-            DisposableEffect(player) { onDispose { player.release() } }
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                        this.player = player
+            // Start from the stored dimensions; the decoder's real (rotation-corrected) size replaces it.
+            var videoSize by remember(asset.id) {
+                mutableStateOf(
+                    if (asset.width > 0 && asset.height > 0) Size(asset.width.toFloat(), asset.height.toFloat())
+                    else Size(16f, 9f)
+                )
+            }
+            DisposableEffect(player) {
+                val listener = object : Player.Listener {
+                    override fun onVideoSizeChanged(size: VideoSize) {
+                        if (size.width > 0 && size.height > 0) {
+                            videoSize = Size(size.width * size.pixelWidthHeightRatio, size.height.toFloat())
+                        }
                     }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-            Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })
+                }
+                player.addListener(listener)
+                onDispose {
+                    player.removeListener(listener)
+                    player.release()
+                }
+            }
+            // Pinch / double-tap to zoom the playing video, same gestures as photos.
+            val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 6f))
+            LaunchedEffect(videoSize) {
+                zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(videoSize))
+            }
+            Box(Modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() })) {
+                // A TextureView (unlike PlayerView's default SurfaceView) can be scaled and moved by Compose.
+                AndroidView(
+                    factory = { ctx -> TextureView(ctx).also { player.setVideoTextureView(it) } },
+                    modifier = Modifier.align(Alignment.Center).aspectRatio(videoSize.width / videoSize.height),
+                )
+            }
             VideoControls(player, visible = chrome, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp))
         } else {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })

@@ -1,6 +1,5 @@
 package io.github.drtron1c.cloudphotos.photos
 
-import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -128,7 +127,7 @@ data class Asset(
                 val value = f.optString("value")
                 val name = when (f.optString("type")) {
                     "STRING" -> value
-                    else -> runCatching { String(Base64.decode(value, Base64.DEFAULT), Charsets.UTF_8) }.getOrNull()
+                    else -> runCatching { String(java.util.Base64.getMimeDecoder().decode(value), Charsets.UTF_8) }.getOrNull()
                 }
                 if (!name.isNullOrBlank()) return name
             }
@@ -165,7 +164,9 @@ data class Asset(
                 val isVideo = itemType.contains("movie") || itemType.contains("mpeg") || itemType.contains("video") ||
                     originalType.contains("movie") || originalType.contains("mpeg-4")
                 val original = version(mf, "resOriginal")
-                val duration = af.longField("duration")?.toDouble()
+                // CPLAsset "duration" is in milliseconds (checked against real iCloud records:
+                // file sizes only match iPhone bitrates when read as ms).
+                val duration = af.longField("duration")?.takeIf { it > 0 }?.let { it / 1000.0 }
                     ?: run {
                         val v = mf.longField("vidComplDurValue") ?: af.longField("vidComplDurValue")
                         val s = mf.longField("vidComplDurScale") ?: af.longField("vidComplDurScale")
