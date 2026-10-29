@@ -42,7 +42,7 @@ class ReleaseParserTest {
     fun bundledChangelogParses() {
         val entries = Changelog.parse(File("src/main/assets/changelog.md").readText())
         assertTrue(entries.size >= 3)
-        assertTrue(entries.first().build >= 20)
+        assertTrue(entries.first().build >= 21)
         assertTrue(entries.first().items.size >= 4)
         // Someone updating from build 17 sees only the newest section.
         assertEquals(1, Changelog.unseen(entries, 0, 99).size)

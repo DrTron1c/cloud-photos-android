@@ -17,9 +17,6 @@ android {
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Phones/tablets (arm64) and the test emulator (x86_64) only: keeps the AI and VPN
-        // native libraries from bloating the APK.
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     // On-device tests run against a shrunk build identical to release (plus the Kotlin
@@ -43,6 +40,8 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             testProguardFiles("test-proguard-rules.pro")
+            // Phones and tablets are arm64: keeps the AI and VPN native libraries from bloating the APK.
+            ndk { abiFilters += listOf("arm64-v8a") }
             signingConfig = signingConfigs.getByName("shared")
         }
         debug {
@@ -52,6 +51,8 @@ android {
             initWith(getByName("release"))
             proguardFile("test-app-rules.pro")
             matchingFallbacks += listOf("release")
+            // Also x86_64 for the test emulator.
+            ndk { abiFilters.clear(); abiFilters += listOf("arm64-v8a", "x86_64") }
         }
     }
 

@@ -1079,7 +1079,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDns(provider: String) {
         settings.dnsProvider = provider
-        graph.http.connectionPool.evictAll()
+        // Closing pooled TLS connections touches the network: not on the main thread.
+        viewModelScope.launch(Dispatchers.IO) { graph.http.connectionPool.evictAll() }
     }
 
     fun setAutoUpload(on: Boolean, fromNow: Boolean = true) {

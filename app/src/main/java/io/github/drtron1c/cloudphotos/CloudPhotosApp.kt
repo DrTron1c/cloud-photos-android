@@ -74,7 +74,8 @@ class AppGraph(context: Context) {
         .crossfade(120)
         .build()
 
-    val vpn = VpnManager(context.applicationContext as Application, settings, scope) { http.connectionPool.evictAll() }
+    // Closing pooled TLS connections touches the network: never on the main thread.
+    val vpn = VpnManager(context.applicationContext as Application, settings, scope) { Thread { http.connectionPool.evictAll() }.start() }
     val updates = UpdateManager(context.applicationContext as Application, http, settings, scope)
     val smart = SmartSearch(context.applicationContext, settings)
 

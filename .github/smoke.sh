@@ -30,7 +30,9 @@ else:
 PY
 }
 
-adb install -r CloudPhotos.apk 2>&1 | tee $OUT/install.txt
+# The emulator is x86_64; the release APK is arm64-only, so the identical releaseTest build is used.
+APPT=app/build/outputs/apk/releaseTest/app-releaseTest.apk
+adb install -r "$APPT" 2>&1 | tee $OUT/install.txt
 adb logcat -c
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
 sleep 20

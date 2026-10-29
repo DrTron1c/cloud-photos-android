@@ -1,6 +1,6 @@
 # Cloud Photos change log
 
-## Build 20 · Smart Search, Liquid Glass, Proton VPN
+## Build 21 · Smart Search, Liquid Glass, Proton VPN
 - **Smart Search (on-device AI)** — search what's in your photos, like “red hat late 2026” or “dog on a beach summer 2025”. A small AI model looks at your photos on this device; nothing about your photos or searches leaves it. Turn it on in Search or Settings › Smart Search.
 - **Date words in search** — “early / mid / late 2026”, seasons, “last month”, “this year”, “christmas”, “weekend” and decades like “2010s”.
 - **Liquid Glass** — see-through glass tab bar, buttons, toolbars, viewer bars and banners, like iOS 26. Switch it in Settings › Appearance.

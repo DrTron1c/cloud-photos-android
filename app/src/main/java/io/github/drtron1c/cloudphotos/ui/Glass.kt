@@ -114,7 +114,7 @@ fun GlassSurface(
     dark: Boolean? = null,
     elevation: Dp = 0.dp,
     flat: Color = LocalPalette.current.bar,
-    blur: Dp = 14.dp,
+    blur: Dp = 18.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val p = LocalPalette.current
@@ -136,8 +136,9 @@ fun GlassSurface(
     val effect = remember(size, blurPx, radiusPx) {
         if (size.width > 0 && size.height > 0 && glassSupported()) glassEffect(size, blurPx, radiusPx) else null
     }
-    val tint = if (smoky) Color(0xFF121214).copy(alpha = if (backdrop != null) 0.32f else 0.72f)
-    else Color.White.copy(alpha = if (backdrop != null) 0.30f else 0.82f)
+    // Enough frosting that text on top stays readable over busy, colourful photos.
+    val tint = if (smoky) Color(0xFF121214).copy(alpha = if (backdrop != null) 0.44f else 0.74f)
+    else Color.White.copy(alpha = if (backdrop != null) 0.46f else 0.84f)
     val rim = Brush.linearGradient(
         0f to Color.White.copy(alpha = if (smoky) 0.42f else 0.85f),
         0.45f to Color.White.copy(alpha = 0.06f),
