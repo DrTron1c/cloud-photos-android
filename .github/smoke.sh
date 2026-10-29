@@ -35,6 +35,8 @@ adb logcat -c
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
 sleep 20
 shot 1-login
+# Scroll to the bottom of the sign-in screen, then open the network privacy options.
+adb shell input swipe 500 1600 500 400 300; sleep 2
 tap_text "Network privacy"; sleep 3; shot 2-dns-dialog
 tap_text "Quad9"; sleep 3; shot 3-after-dns
 adb shell cmd uimode night yes; sleep 6; shot 4-login-dark
