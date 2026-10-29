@@ -9,7 +9,7 @@
 - **Full screen** — a tap hides everything, including the video bar; zooming in hides it too. Rounded icon in Recents.
 - **Zoom** — zoom much further into photos and videos; photos load full-resolution detail as you zoom, and videos zoom at their own resolution.
 - **Shared Albums** — add photos (from your library or this device), like and comment, using the same requests as icloud.com. New — tell me if anything misbehaves.
-- **Videos** — the picture follows your finger as you drag the progress bar; a strip of frames to scrub through and frame-by-frame buttons when paused; picture-in-picture, playback speed, save a frame, trim to a new clip.
+- **Videos** — always shown whole, fitted to the screen whatever their shape (portrait phone videos on a tablet, landscape on a phone); pinch to zoom, pinch out to see it all again. The picture follows your finger as you drag the progress bar; a strip of frames to scrub through and frame-by-frame buttons when paused; picture-in-picture, playback speed, save a frame, trim to a new clip.
 - **Where was this?** — the globe button on a photo or video shows where it was taken on the map, with “Photos Taken Here”.
 - **Tablets** — iPad-style sidebar, photos open beside the grid, highest refresh rate (e.g. 144 Hz), keyboard shortcuts (Ctrl+/), drag photos into other apps and drop photos in to upload.
 - **More** — export to any folder, share HEIC as JPEG, Quick Settings tile for Proton VPN, long-press app-icon shortcuts.

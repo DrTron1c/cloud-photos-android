@@ -919,33 +919,11 @@ private fun VideoPage(
                 newPlayer(context, vm.http, vm.mediaUri(video), loop = s.loopVideos, muted = s.startMuted)
                     .apply { playWhenReady = s.autoplayVideos }
             }
-            // The video's real shape comes from the decoder (stored sizes can be sideways for phone
-            // videos). Until it's known nothing is drawn, so it never shows zoomed or stretched.
-            var frameSize by remember(asset.id) { mutableStateOf<Size?>(null) }
-            var rotation by remember(asset.id) { mutableIntStateOf(0) }
-            fun take(v: VideoSize) {
-                if (v.width > 0 && v.height > 0) {
-                    frameSize = Size(v.width * v.pixelWidthHeightRatio, v.height.toFloat())
-                    rotation = ((v.unappliedRotationDegrees % 360) + 360) % 360
-                }
+            DisposableEffect(player) { onDispose { player.release() } }
+            // The picture's shape on screen, once the decoder reports it (used for picture-in-picture).
+            var videoSize by remember(asset.id) {
+                mutableStateOf(if (asset.width > 0 && asset.height > 0) Size(asset.width.toFloat(), asset.height.toFloat()) else Size(16f, 9f))
             }
-            DisposableEffect(player) {
-                val listener = object : Player.Listener {
-                    override fun onVideoSizeChanged(videoSize: VideoSize) = take(videoSize)
-                }
-                player.addListener(listener)
-                take(player.videoSize)
-                onDispose {
-                    player.removeListener(listener)
-                    player.release()
-                }
-            }
-            LaunchedEffect(player) {
-                while (frameSize == null) { take(player.videoSize); delay(100) }
-            }
-            val sideways = rotation == 90 || rotation == 270
-            val videoSize = frameSize?.let { if (sideways) Size(it.height, it.width) else it }
-                ?: if (asset.width > 0 && asset.height > 0) Size(asset.width.toFloat(), asset.height.toFloat()) else Size(16f, 9f)
             // Picture-in-picture while it plays; keyboard space / P / M.
             var playingNow by remember(asset.id) { mutableStateOf(false) }
             LaunchedEffect(player) {
@@ -978,46 +956,16 @@ private fun VideoPage(
             // Pinch / double-tap to zoom the playing video, same gestures as photos.
             val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
             HideBarsWhenZoomed(zoom, onZoomIn)
-            // Always start fitted to the screen (whole video visible); pinch out returns here.
-            LaunchedEffect(videoSize, frameSize != null) {
-                zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(videoSize))
-                if (frameSize != null) runCatching { zoom.resetZoom() }
-            }
             var texture by remember(asset.id) { mutableStateOf<TextureView?>(null) }
-            Box(Modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() })) {
-                // The TextureView is laid out at the video's own resolution and scaled down to fit,
-                // so zooming in shows the real pixels instead of a blown-up screen-sized copy.
-                // Hidden until the decoder reports the real size (it needs the surface attached to do so).
-                val known = frameSize != null
-                val frame = frameSize ?: (if (sideways) Size(videoSize.height, videoSize.width) else videoSize)
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    run {
-                        val longest = max(frame.width, frame.height).coerceAtLeast(1f)
-                        val cap = if (longest > 4096f) 4096f / longest else 1f
-                        val bufW = (frame.width * cap).roundToInt().coerceAtLeast(1)
-                        val bufH = (frame.height * cap).roundToInt().coerceAtLeast(1)
-                        val shownW = if (sideways) bufH else bufW
-                        val shownH = if (sideways) bufW else bufH
-                        val fit = min(constraints.maxWidth.toFloat() / shownW, constraints.maxHeight.toFloat() / shownH)
-                        AndroidView(
-                            factory = { ctx -> TextureView(ctx).also { player.setVideoTextureView(it); texture = it } },
-                            modifier = Modifier.align(Alignment.Center).layout { measurable, _ ->
-                                val placeable = measurable.measure(Constraints.fixed(bufW, bufH))
-                                val w = (shownW * fit).roundToInt()
-                                val h = (shownH * fit).roundToInt()
-                                layout(w, h) {
-                                    placeable.placeWithLayer((w - bufW) / 2, (h - bufH) / 2) {
-                                        scaleX = fit
-                                        scaleY = fit
-                                        rotationZ = rotation.toFloat()
-                                        alpha = if (known) 1f else 0f
-                                    }
-                                }
-                            },
-                        )
-                    }
-                }
-            }
+            // Always the whole video at rest, whatever its shape; pinch out returns here.
+            FittedVideo(
+                player = player,
+                zoom = zoom,
+                fallback = videoSize,
+                onTap = onTap,
+                onShape = { videoSize = it },
+                onTexture = { texture = it },
+            )
             VideoControls(
                 vm = vm,
                 player = player,

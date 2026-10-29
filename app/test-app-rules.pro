@@ -12,3 +12,5 @@
 -keep class androidx.activity.** { *; }
 # The media tests drive Media3 Transformer directly (making a test video from a picture).
 -keep class androidx.media3.** { *; }
+# The video-fit test drives the zoom library directly.
+-keep class me.saket.telephoto.** { *; }
