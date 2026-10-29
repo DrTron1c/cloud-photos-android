@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Share
@@ -173,6 +175,7 @@ fun PhotoGrid(
     var confirmDelete by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var addToAlbum by remember { mutableStateOf<List<Asset>?>(null) }
+    var addToShared by remember { mutableStateOf<List<Asset>?>(null) }
     fun endSelection() {
         selecting = false
         selected.clear()
@@ -563,6 +566,13 @@ fun PhotoGrid(
                                         onClick = { menu = false; addToAlbum = chosen },
                                     )
                                 }
+                                if (vm.sharedAlbums.any { it.canPost }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Add to Shared Album") },
+                                        leadingIcon = { Icon(Icons.Outlined.Group, null) },
+                                        onClick = { menu = false; addToShared = chosen },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Save to Device") },
                                     leadingIcon = { Icon(Icons.Outlined.Download, null) },
@@ -625,6 +635,36 @@ fun PhotoGrid(
     addToAlbum?.let { assets ->
         AddToAlbumDialog(vm, assets, onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null; endSelection() })
     }
+    addToShared?.let { assets ->
+        AddToSharedDialog(vm, assets, onDismiss = { addToShared = null }) { addToShared = null; endSelection() }
+    }
+}
+
+/** Pick a shared album (one you own, or one that lets subscribers post) for the selected items. */
+@Composable
+fun AddToSharedDialog(vm: MainViewModel, assets: List<Asset>, onDismiss: () -> Unit, onPicked: () -> Unit) {
+    val p = LocalPalette.current
+    val albums = vm.sharedAlbums.filter { it.canPost }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (assets.size == 1) "Add to Shared Album" else "Add ${assets.size} Items to Shared Album") },
+        text = {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(albums.size) { i ->
+                    val a = albums[i]
+                    Row(
+                        Modifier.fillMaxWidth().clickable { vm.addToShared(a, assets); onPicked() }.padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Group, null, tint = p.secondaryLabel)
+                        Spacer(Modifier.width(12.dp))
+                        Text(a.name, color = p.label, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

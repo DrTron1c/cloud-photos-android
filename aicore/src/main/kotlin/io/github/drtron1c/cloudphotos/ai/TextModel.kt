@@ -156,7 +156,8 @@ class TextModel(detector: File, recognizer: File, threads: Int = 2) : AutoClosea
             val off = s * classes
             for (c in 0 until classes) if (probs[off + c] > bestP) { bestP = probs[off + c]; best = c }
             if (best != 0 && best != last) {
-                sb.append(characters.getOrElse(best) { "" })
+                // The last class is always the space (whatever the length of the character list).
+                sb.append(if (best == classes - 1) " " else characters.getOrElse(best) { "" })
                 confSum += bestP; confN++
             }
             last = best

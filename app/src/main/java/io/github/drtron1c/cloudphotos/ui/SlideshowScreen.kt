@@ -234,7 +234,7 @@ fun SlideshowScreen(
                         Text(memory.title, color = Color.White, fontSize = 28.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                         androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            androidx.compose.material3.Button(onClick = { finished = false; position = 0; replay++ }) { Text("Play Again") }
+                            androidx.compose.material3.Button(onClick = { finished = false; position = 0; skip = 0; replay++ }) { Text("Play Again") }
                             androidx.compose.material3.OutlinedButton(onClick = { onClose(); vm.memoryList(memory)?.let { vm.openList(it) } }) { Text("Show Photos", color = Color.White) }
                         }
                         androidx.compose.material3.TextButton(onClick = onClose) { Text("Close", color = Color.White) }

@@ -344,6 +344,27 @@ data class AlbumSpec(
     }
 }
 
+/** A comment or a like on a shared-album photo. */
+data class SharedComment(
+    val position: String,
+    val isLike: Boolean,
+    val text: String,
+    val name: String,
+    val byMe: Boolean,
+    val canDelete: Boolean,
+) {
+    companion object {
+        fun fromJson(o: JSONObject) = SharedComment(
+            position = o.optString("commentposition"),
+            isLike = o.optString("commenttype") == "1",
+            text = o.optString("comment"),
+            name = o.optString("firstname").ifEmpty { o.optString("fullname") }.ifEmpty { o.optString("lastname") },
+            byMe = o.optString("createdbyme") == "1",
+            canDelete = o.optString("candelete") == "1",
+        )
+    }
+}
+
 /** An iCloud Shared Album (the legacy "shared streams" service). */
 data class SharedAlbum(
     val name: String,
@@ -352,15 +373,19 @@ data class SharedAlbum(
     val ctag: String,
     val owner: String,
     val sharingType: String,
+    /** Subscribers may add photos (the owner always can). */
+    val allowContributions: Boolean = false,
 ) {
     val ownedByMe get() = sharingType == "owned"
+    val canPost get() = ownedByMe || allowContributions
 
     fun toJson(): JSONObject = JSONObject().put("n", name).put("l", location).put("g", guid).put("c", ctag)
-        .put("o", owner).put("s", sharingType)
+        .put("o", owner).put("s", sharingType).put("ac", allowContributions)
 
     companion object {
         fun fromJson(o: JSONObject) = SharedAlbum(
             o.optString("n"), o.optString("l"), o.optString("g"), o.optString("c"), o.optString("o"), o.optString("s"),
+            o.optBoolean("ac"),
         )
     }
 }

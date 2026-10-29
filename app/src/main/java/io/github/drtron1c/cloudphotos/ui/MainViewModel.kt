@@ -1484,6 +1484,119 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------- Shared Albums: posting, comments, likes ----------------
+
+    fun sharedAlbumOf(list: MediaList): SharedAlbum? =
+        if (list.spec.kind == AlbumKind.Shared) runCatching { SharedAlbum.fromJson(JSONObject(list.spec.filterJson ?: "{}")) }.getOrNull() else null
+
+    /** Photos and videos from this device into a shared album. */
+    fun postToShared(album: SharedAlbum, uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            var ok = 0
+            uris.forEachIndexed { i, uri ->
+                uploadStatus = if (uris.size == 1) "Adding to “${album.name}”…" else "Adding ${i + 1} of ${uris.size} to “${album.name}”…"
+                try {
+                    val (file, name, _) = graph.media.stageForUpload(uri)
+                    try { graph.photos.sharedUpload(album, file, name); ok++ } finally { file.delete() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    toast(friendly(e))
+                }
+            }
+            afterSharedPost(album, ok)
+        }
+    }
+
+    /** Library photos into a shared album (each original is fetched, then posted). */
+    fun addToShared(album: SharedAlbum, assets: List<Asset>, done: () -> Unit = {}) {
+        if (assets.isEmpty()) return
+        val dir = File(getApplication<Application>().cacheDir, "upload").apply { mkdirs() }
+        viewModelScope.launch {
+            var ok = 0
+            assets.forEachIndexed { i, a ->
+                uploadStatus = if (assets.size == 1) "Adding to “${album.name}”…" else "Adding ${i + 1} of ${assets.size} to “${album.name}”…"
+                try {
+                    val file = graph.media.downloadCurrent(a, dir, compatible = false)
+                    try { graph.photos.sharedUpload(album, file, file.name); ok++ } finally { file.delete() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    toast("${a.filename}: ${friendly(e)}")
+                }
+            }
+            done()
+            afterSharedPost(album, ok)
+        }
+    }
+
+    private suspend fun afterSharedPost(album: SharedAlbum, ok: Int) {
+        uploadStatus = if (ok > 0) "Added $ok to “${album.name}” — iCloud is processing…" else null
+        if (ok > 0) {
+            delay(6000)
+            lists[keyFor(AlbumSpec.shared(album))]?.refresh()
+            delay(1500)
+            uploadStatus = null
+        }
+    }
+
+    fun loadComments(album: SharedAlbum, asset: Asset, onResult: (List<io.github.drtron1c.cloudphotos.photos.SharedComment>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onResult(graph.photos.sharedComments(album, asset))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't load comments: ${friendly(e)}")
+                onResult(emptyList())
+            }
+        }
+    }
+
+    fun addComment(album: SharedAlbum, asset: Asset, text: String, done: () -> Unit) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                graph.photos.sharedComment(album, asset, t)
+                done()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't post the comment: ${friendly(e)}")
+            }
+        }
+    }
+
+    /** Like, or take your like back. */
+    fun toggleLike(album: SharedAlbum, asset: Asset, comments: List<io.github.drtron1c.cloudphotos.photos.SharedComment>, done: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val mine = comments.firstOrNull { it.isLike && it.byMe }
+                if (mine != null) graph.photos.sharedDeleteComment(album, asset, mine) else graph.photos.sharedComment(album, asset, null)
+                done()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't update your like: ${friendly(e)}")
+            }
+        }
+    }
+
+    fun deleteComment(album: SharedAlbum, asset: Asset, c: io.github.drtron1c.cloudphotos.photos.SharedComment, done: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                graph.photos.sharedDeleteComment(album, asset, c)
+                done()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't delete the comment: ${friendly(e)}")
+            }
+        }
+    }
+
     // ---------------- copy, drag & drop, frames, export ----------------
 
     /** Ctrl+C / Copy: the photo on the clipboard, ready to paste into another app. */

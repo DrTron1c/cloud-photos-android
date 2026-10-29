@@ -29,7 +29,7 @@ class ReleaseParserTest {
         assertEquals(23, info.versionCode)
         assertEquals(1234L, info.sizeBytes)
         assertTrue(info.apkUrl.endsWith("CloudPhotos.apk"))
-        assertTrue(info.notes.any { it.title.startsWith("Smart Search") })
+        assertTrue(info.notes.joinToString { it.title }, info.notes.any { it.title.startsWith("Memories") })
         assertTrue(ReleaseParser.isNewer(23, 17))
     }
 

@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -319,6 +320,11 @@ private fun RouteView(vm: MainViewModel, i: Int, route: Route, covered: Boolean,
 private fun AlbumGrid(vm: MainViewModel, list: MediaList, level: Int, covered: Boolean) {
     val spec = list.spec
     var menu by remember { mutableStateOf(false) }
+    // Shared Albums you can post to: + adds photos from this device.
+    val shared = remember(spec.key) { vm.sharedAlbumOf(list) }
+    val sharedPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(50)) { uris ->
+        shared?.let { vm.postToShared(it, uris) }
+    }
     val canKeepOffline = !vm.offlineMode && spec.kind != AlbumKind.Virtual &&
         spec.kind != AlbumKind.Hidden && spec.kind != AlbumKind.Deleted && spec.kind != AlbumKind.Library
     PhotoGrid(
@@ -329,6 +335,13 @@ private fun AlbumGrid(vm: MainViewModel, list: MediaList, level: Int, covered: B
         keyLevel = level,
         keysEnabled = !covered,
         headerActions = {
+            if (shared != null && shared.canPost && !vm.offlineMode) {
+                Pill(icon = Icons.Filled.Add, onClick = {
+                    vm.expectingExternal = true
+                    sharedPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                })
+                Spacer(Modifier.width(8.dp))
+            }
             Box {
                 Pill(icon = Icons.Filled.MoreHoriz, onClick = { menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

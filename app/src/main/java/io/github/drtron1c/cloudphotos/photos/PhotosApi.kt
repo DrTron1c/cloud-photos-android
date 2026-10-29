@@ -238,6 +238,7 @@ class PhotosApi(
                 ctag = a.optString("albumctag"),
                 owner = a.optString("ownerdsid"),
                 sharingType = a.optString("sharingtype"),
+                allowContributions = a.optJSONObject("attributes")?.optString("allowcontributions") == "1",
             )
         }
         return out.filter { it.location.isNotEmpty() && it.guid.isNotEmpty() }
@@ -273,6 +274,85 @@ class PhotosApi(
         }
         return seen.values.sortedBy { it.date }
     }
+
+    // ---- Shared Albums: posting, comments and likes ----
+    // Built from the requests icloud.com's own Photos web app makes (its public code):
+    // owned albums go to <sharedstreams>/<dsid>/sharedstreams/<call>, subscribed ones to the
+    // album's own location. Bodies are JSON sent as text/plain.
+
+    private fun sharedUrl(album: SharedAlbum, call: String): String {
+        if (album.ownedByMe) {
+            val root = state.sharedStreamsUrl ?: throw PhotosApiException("Shared Albums aren't available for this account on the web.")
+            val dsid = state.dsid ?: throw SessionExpiredException()
+            return "$root/$dsid/sharedstreams/$call?${params()}"
+        }
+        return "${album.location}$call?${params()}"
+    }
+
+    private suspend fun sharedPost(album: SharedAlbum, call: String, payload: JSONObject): io.github.drtron1c.cloudphotos.net.HttpResult {
+        val r = http.send("POST", sharedUrl(album, call), jsonBody = payload, textPlain = true)
+        if (r.code == 401 || r.code == 421) throw SessionExpiredException()
+        if (!r.ok) {
+            val msg = r.jsonArray()?.optJSONObject(0)?.optString("message")?.ifEmpty { null } ?: r.appleError()
+            throw PhotosApiException(msg ?: "iCloud refused that (error ${r.code}).")
+        }
+        return r
+    }
+
+    /** Comments and likes on one photo of a shared album, oldest first. */
+    suspend fun sharedComments(album: SharedAlbum, asset: Asset): List<SharedComment> {
+        val r = sharedPost(album, "getcomments", JSONObject().put("albumguid", album.guid).put("assetguid", asset.assetRecordName))
+        val arr = r.json()?.optJSONArray("comments") ?: return emptyList()
+        return List(arr.length()) { SharedComment.fromJson(arr.getJSONObject(it)) }.sortedBy { it.position.toIntOrNull() ?: 0 }
+    }
+
+    /** Adds a comment ([text]) or a like ([text] = null). */
+    suspend fun sharedComment(album: SharedAlbum, asset: Asset, text: String?) {
+        val p = JSONObject().put("albumguid", album.guid).put("assetguid", asset.assetRecordName)
+            .put("commenttimestamp", isoNow())
+        if (text != null) p.put("comment", text).put("commenttype", "0") else p.put("commenttype", "1")
+        sharedPost(album, "addcomment", p)
+    }
+
+    /** Removes your comment or like. */
+    suspend fun sharedDeleteComment(album: SharedAlbum, asset: Asset, comment: SharedComment) {
+        sharedPost(
+            album, "deletecomment",
+            JSONObject().put("albumguid", album.guid).put("assetguid", asset.assetRecordName).put("commentposition", comment.position),
+        )
+    }
+
+    /** Adds a photo or video to a shared album you own (or one that lets subscribers post). */
+    suspend fun sharedUpload(album: SharedAlbum, file: File, fileName: String) {
+        // 1. an upload address sized for the file
+        val r1 = sharedPost(album, "webgetuploadurl", JSONObject().put("albumguid", album.guid).put("filesize", file.length()))
+        val url = r1.json()?.optString("uploadurl")?.ifEmpty { null } ?: throw PhotosApiException("iCloud didn't give an upload address.")
+        if (!url.startsWith("https://")) throw PhotosApiException("Refusing to upload over an insecure connection.")
+        // 2. the bytes
+        val receipt = withContext(Dispatchers.IO) {
+            val req = Request.Builder().url("$url&chunker=FIXED").post(file.asRequestBody("application/octet-stream".toMediaType())).build()
+            http.newCall(req).execute().use { res ->
+                val text = res.body?.string() ?: ""
+                if (!res.isSuccessful) throw PhotosApiException("Upload of $fileName failed (error ${res.code}).")
+                val j = JSONObject(text)
+                j.optJSONObject("singleFile") ?: j
+            }
+        }
+        // 3. put it in the album
+        val now = isoNow()
+        sharedPost(
+            album, "webputasset",
+            JSONObject()
+                .put("albumguid", album.guid)
+                .put("assetguid", UUID.randomUUID().toString().uppercase())
+                .put("filename", fileName)
+                .put("collectionmetadata", JSONObject().put("batchDateCreated", now).put("dateCreated", now).put("batchGUID", UUID.randomUUID().toString().uppercase()))
+                .put("singlefileupload", receipt)
+                .put("localtimezoneid", TimeZone.getDefault().id),
+        )
+    }
+
+    private fun isoNow(): String = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
 
     // ---- edits ----
 

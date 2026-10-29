@@ -183,6 +183,11 @@ fun ViewerScreen(
     var addToAlbum by remember { mutableStateOf<Asset?>(null) }
     var liveTrigger by remember { mutableIntStateOf(0) }
     var textSheet by remember { mutableStateOf<List<String>?>(null) }
+    // Shared Albums: likes and comments.
+    val sharedAlbum = remember(list.key) { vm.sharedAlbumOf(list) }
+    var commentsOpen by remember { mutableStateOf(false) }
+    var comments by remember { mutableStateOf<List<io.github.drtron1c.cloudphotos.photos.SharedComment>?>(null) }
+    var commentsFor by remember { mutableStateOf<String?>(null) }
     // Keyboard: space / P go to the video on screen.
     var videoKey by remember { mutableStateOf<((Int) -> Boolean)?>(null) }
     val focus = LocalFocusManager.current
@@ -460,6 +465,30 @@ fun ViewerScreen(
                             Icon(Icons.Outlined.Info, "Info", tint = p.accent)
                         }
                     }
+                    sharedAlbum != null -> {
+                        val liked = comments?.any { it.isLike && it.byMe } == true && commentsFor == current?.id
+                        LaunchedEffect(current?.id) {
+                            val a = current ?: return@LaunchedEffect
+                            comments = null; commentsFor = a.id
+                            vm.loadComments(sharedAlbum, a) { if (commentsFor == a.id) comments = it }
+                        }
+                        IconButton(onClick = { current?.let { a -> vm.share(listOf(a)) { context.startActivity(it) } } }, enabled = enabled) {
+                            Icon(Icons.Outlined.Share, "Share", tint = p.accent)
+                        }
+                        IconButton(onClick = {
+                            val a = current ?: return@IconButton
+                            vm.toggleLike(sharedAlbum, a, comments.orEmpty()) { vm.loadComments(sharedAlbum, a) { comments = it } }
+                        }, enabled = enabled && comments != null) {
+                            if (liked) Icon(Icons.Filled.Favorite, "Unlike", tint = p.accent) else Icon(Icons.Outlined.FavoriteBorder, "Like", tint = p.accent)
+                        }
+                        val n = comments?.count { !it.isLike } ?: 0
+                        TextButton(onClick = { commentsOpen = true }, enabled = enabled) {
+                            Text(if (n > 0) "Comments ($n)" else "Comment", fontSize = 15.sp)
+                        }
+                        IconButton(onClick = { showInfo = true }, enabled = enabled) {
+                            Icon(Icons.Outlined.Info, "Info", tint = p.accent)
+                        }
+                    }
                     spec.kind == AlbumKind.Deleted -> {
                         TextButton(onClick = { current?.let { vm.recover(listOf(it)) } }, enabled = enabled) {
                             Text("Recover", fontSize = 17.sp)
@@ -518,9 +547,57 @@ fun ViewerScreen(
     addToAlbum?.let { a ->
         AddToAlbumDialog(vm, listOf(a), onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null })
     }
+    if (commentsOpen && current != null && sharedAlbum != null) {
+        ModalBottomSheet(onDismissRequest = { commentsOpen = false }, containerColor = p.card) {
+            CommentsSheet(vm, sharedAlbum, current, comments.orEmpty()) { vm.loadComments(sharedAlbum, current) { comments = it } }
+        }
+    }
     textSheet?.let { lines ->
         ModalBottomSheet(onDismissRequest = { textSheet = null }, containerColor = p.card) {
             TextInPhotoSheet(vm, lines)
+        }
+    }
+}
+
+/** Shared Album comments and likes on one photo. */
+@Composable
+private fun CommentsSheet(
+    vm: MainViewModel,
+    album: io.github.drtron1c.cloudphotos.photos.SharedAlbum,
+    asset: Asset,
+    comments: List<io.github.drtron1c.cloudphotos.photos.SharedComment>,
+    reload: () -> Unit,
+) {
+    val p = LocalPalette.current
+    var text by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 28.dp)) {
+        Text("Comments", color = p.label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        val likes = comments.filter { it.isLike }
+        if (likes.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text("♥ Liked by " + likes.joinToString { if (it.byMe) "you" else it.name.ifBlank { "someone" } }, color = p.secondaryLabel, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            val texts = comments.filter { !it.isLike }
+            if (texts.isEmpty()) Text("No comments yet.", color = p.secondaryLabel, fontSize = 15.sp)
+            for (c in texts) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (c.byMe) "You" else c.name.ifBlank { "Someone" }, color = p.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(c.text, color = p.label, fontSize = 15.sp)
+                    }
+                    if (c.byMe || c.canDelete) {
+                        TextButton(onClick = { vm.deleteComment(album, asset, c, reload) }) { Text("Delete", color = p.destructive, fontSize = 13.sp) }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = text, onValueChange = { text = it }, placeholder = { Text("Add a comment") }, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            TextButton(enabled = text.isNotBlank(), onClick = { vm.addComment(album, asset, text) { text = ""; reload() } }) { Text("Post") }
         }
     }
 }
