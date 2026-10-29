@@ -32,6 +32,17 @@ PY
 
 # The emulator is x86_64; the release APK is arm64-only, so the identical releaseTest build is used.
 APPT=app/build/outputs/apk/releaseTest/app-releaseTest.apk
+# Key rotation: old key → rotated key installs; the retired key is then refused.
+if [ -f rotation/1-old.apk ]; then
+  {
+    echo "1 old:      $(adb install rotation/1-old.apk 2>&1 | tail -1)"
+    echo "2 rotated:  $(adb install -r rotation/2-rotated.apk 2>&1 | tail -1)"
+    echo "3 old key:  $(adb install -r rotation/3-old-again.apk 2>&1 | tail -1)"
+  } > $OUT/rotation.txt
+  adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
+  cat $OUT/rotation.txt
+fi
+
 adb install -r "$APPT" 2>&1 | tee $OUT/install.txt
 adb logcat -c
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1

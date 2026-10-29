@@ -49,17 +49,74 @@ jobs:
           gradle --no-daemon --stacktrace --continue :aicore:test :app:testReleaseUnitTest :app:assembleRelease :app:assembleReleaseTest :app:assembleReleaseTestAndroidTest 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
+      # The app's private key lives only in GitHub's secret storage (CLOUDPHOTOS_SIGNING =
+      # "<password>.<base64 PKCS12>"). The original key was public in this repo's history, so it
+      # is used for one thing only: vouching for the new key ("key rotation"), with rollback off so
+      # nothing signed with the old key can ever update the app again.
+      - name: Sign release APK
+        env:
+          CLOUDPHOTOS_SIGNING: ${{ secrets.CLOUDPHOTOS_SIGNING }}
+          OLD_KEY_COMMIT: 7a776fb1663e15722de38031dc66c7e88516a79e
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          K="$RUNNER_TEMP/keys"
+          mkdir -p "$K"
+          git fetch -q --depth=1 origin "$OLD_KEY_COMMIT"
+          git show "$OLD_KEY_COMMIT:app/signing/cloudphotos.p12" > "$K/old.p12"
+          IN=app/build/outputs/apk/release/app-release-unsigned.apk
+          export OLD_PW=cloudphotos
+          if [ -n "${CLOUDPHOTOS_SIGNING:-}" ]; then
+            NEW_PW="${CLOUDPHOTOS_SIGNING%%.*}"
+            echo "::add-mask::$NEW_PW"
+            export NEW_PW
+            printf '%s' "${CLOUDPHOTOS_SIGNING#*.}" | base64 -d > "$K/new.p12"
+            "$APKSIGNER" rotate --out "$K/lineage" \
+              --old-signer --ks "$K/old.p12" --ks-pass env:OLD_PW --set-rollback false \
+              --new-signer --ks "$K/new.p12" --ks-pass env:NEW_PW
+            "$APKSIGNER" sign --ks "$K/new.p12" --ks-pass env:NEW_PW --lineage "$K/lineage" \
+              --v1-signing-enabled false --v2-signing-enabled false --v3-signing-enabled true \
+              --rotation-min-sdk-version 28 --min-sdk-version 30 --out CloudPhotos.apk "$IN"
+            echo "Signed with the new private key (rotated from the old one)."
+          else
+            echo "::warning::The CLOUDPHOTOS_SIGNING secret isn't set yet: signing with the old key so updates keep working."
+            "$APKSIGNER" sign --ks "$K/old.p12" --ks-pass env:OLD_PW --min-sdk-version 30 --out CloudPhotos.apk "$IN"
+          fi
+          rm -rf "$K"
+
       - name: Inspect APK
         run: |
-          cp app/build/outputs/apk/release/app-release.apk CloudPhotos.apk
           AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           {
             "$AAPT2" dump badging CloudPhotos.apk | grep -E "^(package|sdkVersion|targetSdkVersion|application-label:|uses-permission)" || true
-            "$APKSIGNER" verify --print-certs CloudPhotos.apk 2>&1 || true
+            "$APKSIGNER" verify -v --print-certs CloudPhotos.apk 2>&1 | grep -vE "^WARNING" || true
             ls -la CloudPhotos.apk
           } > badging.txt
           cat badging.txt
+
+      # Throwaway keys (made fresh each run) to prove on the test emulator that a rotated key
+      # updates the app and that the retired key can no longer do so.
+      - name: Key rotation test kit
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          R="$RUNNER_TEMP/rot"
+          mkdir -p "$R" rotation
+          for a in a b; do
+            keytool -genkeypair -keystore "$R/$a.p12" -storetype PKCS12 -storepass testpass -keypass testpass \
+              -alias "$a" -keyalg RSA -keysize 2048 -validity 365 -dname "CN=rotation test $a" 2>/dev/null
+          done
+          export PW=testpass
+          "$APKSIGNER" rotate --out "$R/lineage" --old-signer --ks "$R/a.p12" --ks-pass env:PW --set-rollback false \
+            --new-signer --ks "$R/b.p12" --ks-pass env:PW
+          T=launcher/build/outputs/apk/release/launcher-release-unsigned.apk
+          "$APKSIGNER" sign --ks "$R/a.p12" --ks-pass env:PW --min-sdk-version 30 --out rotation/1-old.apk "$T"
+          "$APKSIGNER" sign --ks "$R/b.p12" --ks-pass env:PW --lineage "$R/lineage" \
+            --v1-signing-enabled false --v2-signing-enabled false --v3-signing-enabled true \
+            --rotation-min-sdk-version 28 --min-sdk-version 30 --out rotation/2-rotated.apk "$T"
+          cp rotation/1-old.apk rotation/3-old-again.apk
+          "$APKSIGNER" verify -v --print-certs rotation/2-rotated.apk | grep -E "lineage|Signer|v3" | head -8 || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -70,6 +127,7 @@ jobs:
             app/build/launcher-test/CustomLauncher.apk
             app/build/outputs/apk/releaseTest/app-releaseTest.apk
             app/build/outputs/apk/androidTest/releaseTest/app-releaseTest-androidTest.apk
+            rotation/*.apk
           if-no-files-found: error
 
       # A rolling "latest" release makes the APK one tap to download on the tablet.

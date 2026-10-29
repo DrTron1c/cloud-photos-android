@@ -21,11 +21,23 @@ import java.util.zip.ZipFile
 class LauncherApkTest {
     private val template = File("build/generated/launcherTemplate/launcher-template.apk")
 
+    /** A throwaway key made for this test run (no real key is ever in the repository). */
     private fun key(): Pair<PrivateKey, X509Certificate> {
+        val file = File("build/launcher-test/test-key.p12")
+        if (!file.exists()) {
+            file.parentFile.mkdirs()
+            val keytool = File(System.getProperty("java.home"), "bin/keytool").path
+            val p = ProcessBuilder(
+                keytool, "-genkeypair", "-keystore", file.path, "-storetype", "PKCS12", "-storepass", "testpass",
+                "-keypass", "testpass", "-alias", "test", "-keyalg", "RSA", "-keysize", "2048", "-validity", "365",
+                "-dname", "CN=Cloud Photos test",
+            ).redirectErrorStream(true).start()
+            p.inputStream.readBytes()
+            check(p.waitFor() == 0 && file.exists()) { "keytool failed" }
+        }
         val ks = KeyStore.getInstance("PKCS12")
-        File("signing/cloudphotos.p12").inputStream().use { ks.load(it, "cloudphotos".toCharArray()) }
-        return ks.getKey("cloudphotos", "cloudphotos".toCharArray()) as PrivateKey to
-            ks.getCertificate("cloudphotos") as X509Certificate
+        file.inputStream().use { ks.load(it, "testpass".toCharArray()) }
+        return ks.getKey("test", "testpass".toCharArray()) as PrivateKey to ks.getCertificate("test") as X509Certificate
     }
 
     /** A 432×432 diagonal-gradient PNG with a white dot (no java.awt on the Android test classpath). */

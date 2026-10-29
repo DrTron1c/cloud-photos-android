@@ -5,3 +5,11 @@ local.properties
 .idea/
 .DS_Store
 captures/
+
+# Never commit signing keys or secrets.
+*.p12
+*.jks
+*.keystore
+*.pem
+CLOUDPHOTOS_SIGNING*
+local.properties

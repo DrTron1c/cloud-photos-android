@@ -23,17 +23,6 @@ android {
     // library the test framework needs).
     testBuildType = "releaseTest"
 
-    signingConfigs {
-        create("shared") {
-            // One fixed key so every new build installs straight over the previous one.
-            storeFile = file("signing/cloudphotos.p12")
-            storePassword = "cloudphotos"
-            keyAlias = "cloudphotos"
-            keyPassword = "cloudphotos"
-            storeType = "PKCS12"
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -42,17 +31,20 @@ android {
             testProguardFiles("test-proguard-rules.pro")
             // Phones and tablets are arm64: keeps the AI and VPN native libraries from bloating the APK.
             ndk { abiFilters += listOf("arm64-v8a") }
-            signingConfig = signingConfigs.getByName("shared")
+            // Left unsigned here: CI signs it with the private key kept in GitHub's secret storage.
         }
         debug {
-            signingConfig = signingConfigs.getByName("shared")
+            // Android's throwaway debug key (never used for the real app).
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("releaseTest") {
             initWith(getByName("release"))
             proguardFile("test-app-rules.pro")
             matchingFallbacks += listOf("release")
-            // Also x86_64 for the test emulator.
+            // Also x86_64 for the test emulator. Signed with the throwaway debug key: it only
+            // ever runs on the test emulator.
             ndk { abiFilters.clear(); abiFilters += listOf("arm64-v8a", "x86_64") }
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
