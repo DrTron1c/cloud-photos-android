@@ -583,8 +583,17 @@ fun ViewerScreen(
         AddToAlbumDialog(vm, listOf(a), onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null })
     }
     mapFor?.let { a ->
-        ModalBottomSheet(onDismissRequest = { mapFor = null }, containerColor = p.card, sheetGesturesEnabled = false) {
-            LocationSheet(vm, a) { mapFor = null }
+        // A dialog rather than a sheet, so dragging the map doesn't drag the sheet.
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { mapFor = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                Modifier.padding(16.dp).widthIn(max = 760.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp)).background(p.card).padding(top = 14.dp),
+            ) {
+                LocationSheet(vm, a) { mapFor = null }
+            }
         }
     }
     if (commentsOpen && current != null && sharedAlbum != null) {
