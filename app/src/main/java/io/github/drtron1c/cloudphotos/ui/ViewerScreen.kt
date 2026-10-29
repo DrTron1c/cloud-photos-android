@@ -42,6 +42,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MotionPhotosOn
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.TextFields
@@ -93,6 +96,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -186,6 +190,8 @@ fun ViewerScreen(
     // Live Text: the photo's text laid over it, selectable (long-press, T or the Text button).
     var liveText by remember { mutableStateOf<Pair<String, io.github.drtron1c.cloudphotos.ai.TextLayout>?>(null) }
     var resetZoom by remember { mutableIntStateOf(0) }
+    // The globe button: where this was taken, on the map.
+    var mapFor by remember { mutableStateOf<Asset?>(null) }
     // Shared Albums: likes and comments.
     val sharedAlbum = remember(list.key) { vm.sharedAlbumOf(list) }
     var commentsOpen by remember { mutableStateOf(false) }
@@ -370,6 +376,11 @@ fun ViewerScreen(
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(formatDay(current?.date ?: 0), color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(formatTime(current?.date ?: 0), color = p.secondaryLabel, fontSize = 12.sp)
+                    }
+                    if (current != null && current.latitude != null && current.longitude != null) {
+                        IconButton(onClick = { mapFor = current }) {
+                            Icon(Icons.Outlined.Public, "Show on map", tint = p.accent)
+                        }
                     }
                     if (current != null && !current.isVideo && vm.settings.aiText) {
                         IconButton(onClick = { readText(current) }) {
@@ -571,6 +582,11 @@ fun ViewerScreen(
     addToAlbum?.let { a ->
         AddToAlbumDialog(vm, listOf(a), onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null })
     }
+    mapFor?.let { a ->
+        ModalBottomSheet(onDismissRequest = { mapFor = null }, containerColor = p.card, sheetGesturesEnabled = false) {
+            LocationSheet(vm, a) { mapFor = null }
+        }
+    }
     if (commentsOpen && current != null && sharedAlbum != null) {
         ModalBottomSheet(onDismissRequest = { commentsOpen = false }, containerColor = p.card) {
             CommentsSheet(vm, sharedAlbum, current, comments.orEmpty()) { vm.loadComments(sharedAlbum, current) { comments = it } }
@@ -631,6 +647,64 @@ private fun LiveTextOverlay(vm: MainViewModel, layout: io.github.drtron1c.cloudp
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp)
                 .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
         )
+    }
+}
+
+/** Where a photo or video was taken: its place name and a map with it on (globe button). */
+@Composable
+private fun LocationSheet(vm: MainViewModel, asset: Asset, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val context = LocalContext.current
+    val lat = asset.latitude ?: return
+    val lon = asset.longitude ?: return
+    val s = vm.settings
+    val place = remember(lat, lon) { vm.placeLabel(lat, lon) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(place ?: "Location", color = p.label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text("%.5f, %.5f".format(lat, lon), color = p.secondaryLabel, fontSize = 13.sp)
+            }
+            TextButton(onClick = onClose) { Text("Done") }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (s.placesMap) {
+            val thumb = thumbRequest(vm, asset)
+            io.github.drtron1c.cloudphotos.places.OsmMap(
+                points = remember(asset.id) { listOf(io.github.drtron1c.cloudphotos.places.MapPoint(asset.id, lat, lon)) },
+                geo = vm.geoOrNull(),
+                imageLoader = vm.imageLoader,
+                thumbnail = { thumb },
+                onOpen = { },
+                modifier = Modifier.fillMaxWidth().height(380.dp).clip(RoundedCornerShape(14.dp)),
+            )
+        } else {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.placeholder).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Show a map?", color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "The map pictures (OpenStreetMap data) come from CARTO: their servers see which map areas you look at — never your photos. Place names are in English.",
+                    color = p.secondaryLabel, fontSize = 13.sp,
+                )
+                TextButton(onClick = { s.placesMap = true }) { Text("Show Map") }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row {
+            TextButton(onClick = {
+                val near = vm.photosNear(lat, lon)
+                if (near.isNotEmpty()) { onClose(); vm.idsList("near:${asset.id}", place ?: "Nearby", near, "place", keepOrder = false)?.let { vm.openList(it) } }
+                else vm.toast("Still organising your library…")
+            }) { Text("Photos Taken Here") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = {
+                vm.expectingExternal = true
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon"))) }
+                    .onFailure { vm.toast("No maps app installed") }
+            }) { Text("Open in Maps App") }
+        }
     }
 }
 
@@ -936,6 +1010,8 @@ private fun VideoPage(
                     if (bmp == null) vm.toast("The video isn't showing yet") else vm.saveFrame(asset, bmp, player.currentPosition, toLibrary)
                 },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp),
+                videoUri = vm.mediaUri(video),
+                videoBytes = video.size,
             )
         } else {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })
@@ -973,6 +1049,8 @@ private fun VideoControls(
     onTrim: () -> Unit,
     onSaveFrame: (toLibrary: Boolean) -> Unit,
     modifier: Modifier,
+    videoUri: Uri? = null,
+    videoBytes: Long = 0L,
 ) {
     var speed by remember { mutableFloatStateOf(1f) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -983,6 +1061,31 @@ private fun VideoControls(
     var buffering by remember { mutableStateOf(true) }
     var muted by remember { mutableStateOf(startMuted) }
     var scrub by remember { mutableFloatStateOf(-1f) }
+    // Dragging the bar or the frame strip moves the picture with your finger, frame by frame.
+    var resumeAfter by remember { mutableStateOf(false) }
+    var lastSeek by remember { mutableLongStateOf(0L) }
+    fun scrubTo(ms: Long) {
+        if (scrub < 0f) {
+            resumeAfter = player.playWhenReady
+            player.playWhenReady = false
+            player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+        }
+        scrub = if (duration > 0) (ms.toFloat() / duration).coerceIn(0f, 1f) else 0f
+        val now = System.currentTimeMillis()
+        if (now - lastSeek > 45) { player.seekTo(ms); lastSeek = now }
+    }
+    fun scrubEnd() {
+        if (scrub >= 0f && duration > 0) player.seekTo((scrub * duration).toLong())
+        scrub = -1f
+        if (resumeAfter) player.playWhenReady = true
+        resumeAfter = false
+    }
+    fun step(frames: Int) {
+        val fps = player.videoFormat?.frameRate?.takeIf { it > 0f } ?: 30f
+        player.playWhenReady = false
+        player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+        player.seekTo((player.currentPosition + (frames * 1000f / fps).toLong()).coerceIn(0L, duration.coerceAtLeast(0L)))
+    }
     LaunchedEffect(player) {
         while (true) {
             position = player.currentPosition
@@ -1000,15 +1103,31 @@ private fun VideoControls(
             )
         }
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-            Row(
+            Column(
                 Modifier
                     .padding(horizontal = 14.dp)
                     .widthIn(max = 720.dp)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
+            if (videoUri != null && duration > 0) {
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 6.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!playing) {
+                        IconButton(onClick = { step(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous frame", tint = Color.White) }
+                    }
+                    FrameStrip(
+                        vm, videoUri, videoBytes, duration,
+                        positionMs = if (scrub >= 0) (scrub * duration).toLong() else position,
+                        onScrub = { scrubTo(it) }, onScrubEnd = { scrubEnd() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!playing) {
+                        IconButton(onClick = { step(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next frame", tint = Color.White) }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     if (player.playbackState == Player.STATE_ENDED) {
                         player.seekTo(0); player.playWhenReady = true
@@ -1020,11 +1139,8 @@ private fun VideoControls(
                     color = Color.White, fontSize = 12.sp, modifier = Modifier.width(44.dp), textAlign = TextAlign.Center)
                 Slider(
                     value = if (scrub >= 0) scrub else if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
-                    onValueChange = { scrub = it },
-                    onValueChangeFinished = {
-                        if (duration > 0 && scrub >= 0) player.seekTo((scrub * duration).toLong())
-                        scrub = -1f
-                    },
+                    onValueChange = { scrubTo((it * duration).toLong()) },
+                    onValueChangeFinished = { scrubEnd() },
                     colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = 0.3f)),
                     modifier = Modifier.weight(1f),
                 )
@@ -1075,6 +1191,7 @@ private fun VideoControls(
                         }
                     }
                 }
+            }
             }
         }
     }

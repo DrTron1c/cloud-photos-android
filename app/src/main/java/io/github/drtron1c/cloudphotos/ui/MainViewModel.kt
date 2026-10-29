@@ -1426,6 +1426,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun placeLabel(lat: Double, lon: Double): String? = runCatching { geo.label(lat, lon) }.getOrNull()
     fun geoOrNull(): io.github.drtron1c.cloudphotos.places.Geo? = runCatching { geo }.getOrNull()
 
+    /** Library photos taken within about a kilometre of here. */
+    fun photosNear(lat: Double, lon: Double): List<String> =
+        index.entries.filter { e ->
+            val la = e.lat; val lo = e.lon
+            la != null && lo != null && io.github.drtron1c.cloudphotos.memories.MemoryMaker.distanceKm(lat, lon, la, lo) <= 1.0
+        }.map { it.id }
+
     // Similar photos
 
     var similar by mutableStateOf<List<List<String>>?>(null)
