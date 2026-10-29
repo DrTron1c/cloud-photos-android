@@ -164,8 +164,8 @@ fun OsmMap(
                         zoom < 3.5f -> 5_000_000; zoom < 4.5f -> 2_000_000; zoom < 5.5f -> 800_000
                         zoom < 6.5f -> 250_000; zoom < 7.5f -> 100_000; zoom < 8.5f -> 40_000; else -> 15_000
                     }
-                    val countries = if (zoom < 6f) geo.countries.filter { it.lat in latBottom..latTop } else emptyList()
-                    countries + geo.towns(latBottom, latTop, lonLeft, lonRight, minPop, 80)
+                    // The base map already names countries and seas (in English); the app adds towns.
+                    geo.towns(latBottom, latTop, lonLeft, lonRight, minPop, 80)
                 }
                 val taken = HashSet<Pair<Int, Int>>()
                 val cellW = with(density) { 110.dp.toPx() }
