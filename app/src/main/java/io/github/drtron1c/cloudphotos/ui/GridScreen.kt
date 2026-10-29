@@ -65,6 +65,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -175,7 +176,11 @@ fun PhotoGrid(
         onSelectingChanged(false)
     }
     LaunchedEffect(selecting) { onSelectingChanged(selecting) }
+    // The photos are the backdrop for the glass header buttons and toolbar.
+    val glass = LocalGlassEnabled.current
+    val gridGlass = if (glass) rememberGlassBackdrop() else null
 
+    CompositionLocalProvider(LocalGlassBackdrop provides gridGlass) {
     Box(Modifier.fillMaxSize().background(p.background)) {
         when {
             count < 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -280,6 +285,7 @@ fun PhotoGrid(
                     contentPadding = PaddingValues(top = statusTop + 64.dp, bottom = bottomReserve + 12.dp),
                     modifier = Modifier
                         .fillMaxSize()
+                        .glassSource(gridGlass)
                         .onSizeChanged { gridHeight = it.height }
                         .pointerInput(options.size) {
                             // Pinch to change how many photos fit across, like iPhone.
@@ -489,11 +495,10 @@ fun PhotoGrid(
         ) {
             val chosen = selected.values.toList()
             val tint = if (chosen.isNotEmpty()) p.accent else p.secondaryLabel
+            GlassBar(navBottom) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(p.bar)
-                    .padding(bottom = navBottom)
                     .height(TAB_BAR_HEIGHT.dp)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -566,7 +571,9 @@ fun PhotoGrid(
                     }
                 }
             }
+            }
         }
+    }
     }
 
     if (confirmDelete) {

@@ -7,3 +7,6 @@
 -keep class androidx.lifecycle.** { *; }
 -keep class androidx.core.** { *; }
 -keep class com.google.common.util.concurrent.** { *; }
+-keep class androidx.compose.** { *; }
+-keep class kotlinx.coroutines.** { *; }
+-keep class androidx.activity.** { *; }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
+import io.github.drtron1c.cloudphotos.ai.ModelState
 import io.github.drtron1c.cloudphotos.photos.AlbumSpec
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -65,10 +68,10 @@ fun SearchTab(vm: MainViewModel) {
     fun run(q: String) {
         if (q.isBlank()) return
         keyboard?.hide()
-        val list = vm.search(q)
-        if (list == null) vm.toast("Still organising your library… ${(vm.index.progress * 100).toInt()}%")
-        else vm.openList(list)
+        vm.runSearch(q)
     }
+    val modelState by vm.smart.modelState.collectAsState()
+    val analysed by vm.smart.indexed.collectAsState()
 
     Column(
         Modifier
@@ -83,7 +86,7 @@ fun SearchTab(vm: MainViewModel) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Dates, months, years, file names, videos…") },
+            placeholder = { Text(if (vm.settings.aiSearch) "Things, places, dates… e.g. red hat late 2026" else "Dates, months, years, file names, videos…") },
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
             trailingIcon = {
                 if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, "Clear") }
@@ -110,18 +113,28 @@ fun SearchTab(vm: MainViewModel) {
 
         if (query.isNotBlank()) {
             val n = remember(query, vm.index.entries) { vm.searchCount(query) }
-            if (n >= 0) {
+            val smartQuery = remember(query) { SearchQuery.parse(query)?.hasPhrase == true }
+            if (n == 0 && smartQuery && vm.smartReady) {
+                Button(onClick = { run(query) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.AutoAwesome, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Search the Pictures")
+                }
+            } else if (n >= 0) {
                 Button(onClick = { run(query) }, enabled = n > 0, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                     Text(if (n == 0) "No results" else if (n == 1) "Show 1 result" else "Show %,d results".format(n))
                 }
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                "Try “March 2024”, “videos 2023”, “today”, “favourites summer”, “screenshots”, “IMG_1234” or “edited”.",
+                if (vm.settings.aiSearch) "Describe what's in the photo and when: “red hat late 2026”, “dog on a beach summer 2025”, “birthday cake”, “snow last year”. File names like “IMG_1234” work too."
+                else "Try “March 2024”, “late 2025”, “videos 2023”, “today”, “favourites summer”, “screenshots”, “IMG_1234” or “edited”. Turn on Smart Search below to search what's in the pictures.",
                 color = p.secondaryLabel, fontSize = 13.sp,
             )
             return@Column
         }
+
+        SmartSearchCard(vm, modelState, analysed)
 
         Section("Media Types")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -170,4 +183,42 @@ private fun Chip(text: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
+}
+
+/** On-device AI search: off / downloading / analysing / ready. */
+@Composable
+private fun SmartSearchCard(vm: MainViewModel, modelState: ModelState, analysed: Int) {
+    val p = LocalPalette.current
+    Spacer(Modifier.height(4.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.placeholder).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.AutoAwesome, null, tint = p.accent)
+            Spacer(Modifier.width(8.dp))
+            Text("Smart Search", color = p.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (!vm.settings.aiSearch) {
+            Text(
+                "Search what's in your photos — “red hat late 2026”. Runs entirely on this device: your photos and searches never leave it. " +
+                    "Needs a one-time ${megabytes(vm.smart.downloadSize)} download, then analyses your library in the background.",
+                color = p.secondaryLabel, fontSize = 14.sp,
+            )
+            Button(onClick = { vm.setAiSearch(true) }, shape = RoundedCornerShape(12.dp)) { Text("Turn On Smart Search") }
+        } else {
+            val status = when (modelState) {
+                is ModelState.Downloading -> "Downloading the AI model… ${megabytes(modelState.bytes)} of ${megabytes(modelState.total)}"
+                is ModelState.Failed -> "Model download failed: ${modelState.message}. It will try again."
+                else -> vm.aiStatus().ifBlank { if (analysed > 0) "%,d photos analysed".format(analysed) else "Starting…" }
+            }
+            Text(status, color = p.secondaryLabel, fontSize = 14.sp)
+            if (modelState is ModelState.Downloading && modelState.total > 0) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { (modelState.bytes.toFloat() / modelState.total).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
 }

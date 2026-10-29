@@ -65,18 +65,20 @@ fun LibraryTab(vm: MainViewModel, onUploadClick: () -> Unit) {
     val s = vm.settings
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val view = if (vm.offlineMode) "all" else s.libraryView
-    Box(Modifier.fillMaxSize()) {
+    GlassHost(Modifier.fillMaxSize(), content = {
         when (view) {
             "years" -> PeriodsView(vm, byYear = true)
             "months" -> PeriodsView(vm, byYear = false)
             "days" -> DaysView(vm)
             else -> AllPhotosView(vm, onUploadClick)
         }
+    }) {
         if (!vm.librarySelecting && !vm.offlineMode) {
             ViewSwitcher(
                 selected = view,
                 onSelect = { s.libraryView = it },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + 10.dp),
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + if (LocalGlassEnabled.current) 22.dp else 10.dp),
             )
         }
     }
@@ -248,6 +250,29 @@ private fun PeriodCard(vm: MainViewModel, library: MediaList, period: Period, by
 
 @Composable
 private fun ViewSwitcher(selected: String, onSelect: (String) -> Unit, modifier: Modifier) {
+    val glass = LocalGlassEnabled.current
+    val p = LocalPalette.current
+    if (glass) {
+        GlassSurface(modifier, cornerRadius = null, elevation = 8.dp) {
+            Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                for ((key, title) in VIEWS) {
+                    val on = key == selected
+                    Text(
+                        title,
+                        color = if (on) p.accent else p.label,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (on) p.accent.copy(alpha = 0.16f) else Color.Transparent)
+                            .clickable { onSelect(key) }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier
             .shadow(6.dp, CircleShape)

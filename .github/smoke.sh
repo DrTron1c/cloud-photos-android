@@ -74,11 +74,13 @@ if [ -f "$TEST" ]; then
   adb logcat -d -b crash > $OUT/crash-before-device-test.txt
   # The on-device test installs its own companion (signed with the device key) in its place.
   adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
+  adb shell appops set io.github.drtron1c.cloudphotos ACTIVATE_VPN allow
   adb logcat -c
-  timeout 240 adb shell am instrument -r -w \
+  timeout 600 adb shell am instrument -r -w \
     io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
   echo "exit=$?" >> $OUT/device-test.txt
-  adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err" | tail -150 > $OUT/device-test-logcat.txt
+  adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err|WireGuard|GoBackend|onnx" | tail -250 > $OUT/device-test-logcat.txt
+  for f in glass-light.png glass-dark.png; do adb pull /sdcard/Download/$f $OUT/$f 2>&1 | tail -1; done
   adb shell input keyevent KEYCODE_HOME; sleep 2
   adb shell input swipe 540 2000 540 600 300; sleep 3
   shot 9-app-drawer-device-made

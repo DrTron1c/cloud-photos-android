@@ -47,6 +47,18 @@ object Keys {
     const val CUSTOM_NAME = "custom_name"
     const val HIDE_ORIGINAL_ICON = "hide_original_icon"
     const val COMPANION_STATUS = "companion_status"
+    const val LIQUID_GLASS = "liquid_glass"
+    const val CHECK_UPDATES = "check_updates"
+    const val LAST_SEEN_CHANGELOG = "last_seen_changelog"
+    const val AI_SEARCH = "ai_search"
+    const val AI_CHARGING_ONLY = "ai_charging_only"
+    const val AI_STATUS = "ai_status"
+    const val VPN_AUTO_CONNECT = "vpn_auto_connect"
+    const val VPN_AUTO_DISCONNECT = "vpn_auto_disconnect"
+    const val VPN_COUNTRY = "vpn_country"
+    const val VPN_FREE_ONLY = "vpn_free_only"
+    const val VPN_WHOLE_DEVICE = "vpn_whole_device"
+    const val VPN_REQUIRE = "vpn_require"
 }
 
 /**
@@ -135,6 +147,27 @@ class AppSettings(private val prefs: SharedPreferences) {
     var hideOriginalIcon by bool(Keys.HIDE_ORIGINAL_ICON, false)
 
     val appName: String get() = customName.trim().ifEmpty { "Cloud Photos" }
+
+    /** iOS 26-style Liquid Glass bars and buttons. */
+    var liquidGlass by bool(Keys.LIQUID_GLASS, true)
+    var checkUpdates by bool(Keys.CHECK_UPDATES, true)
+    /** Newest change-log build whose "What's new" was dismissed. */
+    var lastSeenChangelog by int(Keys.LAST_SEEN_CHANGELOG, 0)
+
+    /** On-device AI search (picture contents). */
+    var aiSearch by bool(Keys.AI_SEARCH, false)
+    var aiChargingOnly by bool(Keys.AI_CHARGING_ONLY, false)
+
+    /** Proton VPN: connect when the app opens / disconnect when you leave it. */
+    var vpnAutoConnect by bool(Keys.VPN_AUTO_CONNECT, true)
+    var vpnAutoDisconnect by bool(Keys.VPN_AUTO_DISCONNECT, true)
+    /** Country name, or "" for the closest free country. */
+    var vpnCountry by str(Keys.VPN_COUNTRY, "")
+    var vpnFreeOnly by bool(Keys.VPN_FREE_ONLY, true)
+    /** false = only Cloud Photos uses the VPN; true = the whole device. */
+    var vpnWholeDevice by bool(Keys.VPN_WHOLE_DEVICE, false)
+    /** Don't contact iCloud at all unless the VPN is connected. */
+    var vpnRequire by bool(Keys.VPN_REQUIRE, false)
 
     fun raw(): SharedPreferences = prefs
 

@@ -78,10 +78,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --cleanup-tag --yes || true
+          # The app's updater reads "versionCode: N" and the newest change-log section from these notes.
+          {
+            echo "Unofficial iCloud Photos client for Android 11+. Install CloudPhotos.apk. Built from ${{ github.sha }}."
+            echo
+            echo "versionCode: ${{ github.run_number }}"
+            echo
+            awk '/^## /{n++} n==1' app/src/main/assets/changelog.md
+          } > release-notes.txt
           gh release create latest CloudPhotos.apk \
             --target "${{ github.sha }}" \
             --title "Cloud Photos build ${{ github.run_number }}" \
-            --notes "Unofficial iCloud Photos client for Android 11+. Install CloudPhotos.apk. Built from ${{ github.sha }}."
+            --notes-file release-notes.txt
 
       # Build output on a side branch so failures can be read without the Actions UI.
       - name: Push CI logs
@@ -104,7 +112,7 @@ jobs:
   smoke:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

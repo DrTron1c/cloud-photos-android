@@ -9,6 +9,7 @@ import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
+import io.github.drtron1c.cloudphotos.ai.SmartSearch
 import io.github.drtron1c.cloudphotos.auth.AppleAuth
 import io.github.drtron1c.cloudphotos.net.AuthState
 import io.github.drtron1c.cloudphotos.net.PersistentCookieJar
@@ -18,6 +19,11 @@ import io.github.drtron1c.cloudphotos.photos.MediaActions
 import io.github.drtron1c.cloudphotos.photos.PhotosApi
 import io.github.drtron1c.cloudphotos.settings.AppSettings
 import io.github.drtron1c.cloudphotos.work.OfflineStore
+import io.github.drtron1c.cloudphotos.update.UpdateManager
+import io.github.drtron1c.cloudphotos.vpn.VpnManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.io.File
 
 class CloudPhotosApp : Application() {
@@ -40,7 +46,10 @@ class AppGraph(context: Context) {
     val settings = AppSettings(prefs)
     val authState = AuthState(SecureFile(File(context.filesDir, "session.bin")))
     val cookieJar = PersistentCookieJar(SecureFile(File(context.filesDir, "cookies.bin")))
-    val http = buildHttpClient(cookieJar, authState, prefs)
+    /** App-wide coroutines (updates, VPN). */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    @Volatile private var vpnGate: () -> Boolean = { true }
+    val http = buildHttpClient(cookieJar, authState, prefs) { vpnGate() }
     val auth = AppleAuth(http, authState, cookieJar)
 
     /** Set by the UI layer: how to recover when CloudKit says the session is gone. */
@@ -65,7 +74,12 @@ class AppGraph(context: Context) {
         .crossfade(120)
         .build()
 
+    val vpn = VpnManager(context.applicationContext as Application, settings, scope) { http.connectionPool.evictAll() }
+    val updates = UpdateManager(context.applicationContext as Application, http, settings, scope)
+    val smart = SmartSearch(context.applicationContext, settings)
+
     init {
         photos.zoneName = settings.zone
+        vpnGate = { vpn.gateBlocking() }
     }
 }

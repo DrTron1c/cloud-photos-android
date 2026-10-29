@@ -26,12 +26,9 @@ class ClipModelTest {
         @JvmStatic
         fun setUp() {
             cache = File(System.getProperty("aicore.cache") ?: "build/model-cache").apply { mkdirs() }
-            val info = JSONObject(fetchText("https://huggingface.co/api/models/$REPO"))
-            revision = info.getString("sha")
-            val siblings = info.getJSONArray("siblings")
-            files = (0 until siblings.length()).map { siblings.getJSONObject(it).getString("rfilename") }
-            println("MODEL_REVISION=$revision")
-            println("MODEL_FILES=" + files.joinToString(","))
+            // Same revision the app downloads.
+            revision = "757d59c9c6870a76a4b0306f05f5061bca15c39f"
+            files = emptyList()
         }
 
         private fun open(url: String): HttpURLConnection {
@@ -94,39 +91,29 @@ class ClipModelTest {
     }
 
     @Test
-    fun diagnoseTextModels() {
-        val tok = tokenizer()
-        val cats = pixels(fetchImage("http://images.cocodataset.org/val2017/000000039769.jpg", "cats.jpg"))
-        val phrases = listOf("two cats", "a red hat", "a car", "a dog")
-        for (textFile in listOf("onnx/text_model.onnx", "onnx/text_model_quantized.onnx")) {
-            ClipModel(download("onnx/vision_model.onnx"), download(textFile), tok).use { model ->
-                println("DESCRIBE $textFile\n" + model.describe())
-                val img = model.embedImage(ImagePrep.toChw(cats.first, cats.second, cats.third))
-                for (zero in listOf(true, false)) for (mask in listOf(true, false)) {
-                    model.padWithZero = zero
-                    model.useMask = mask
-                    val t = phrases.associateWith { model.embedText("a photo of $it") }
-                    val cross = "cats·hat=${"%.3f".format(dot(t.getValue("two cats"), t.getValue("a red hat")))}"
-                    println("TEXT $textFile pad0=$zero mask=$mask  $cross  img: " +
-                        t.entries.joinToString("  ") { (p, e) -> "$p=${"%.3f".format(dot(img, e))}" })
-                }
-            }
-        }
-    }
-
-    @Test
     fun picturesMatchTheirWords() {
         val tok = tokenizer()
-        val textFile = listOf("onnx/text_model_quantized.onnx", "onnx/text_model.onnx").first { it in files }
-        val visionCandidates = listOf(
-            "onnx/vision_model_quantized.onnx", "onnx/vision_model_uint8.onnx", "onnx/vision_model_fp16.onnx", "onnx/vision_model.onnx",
-        ).filter { it in files }
+        // The files the app downloads (the 8-bit vision models give unrelated pictures the same
+        // embedding, so the full-precision one is used).
+        val textFile = "onnx/text_model_quantized.onnx"
+        val visionCandidates = listOf("onnx/vision_model.onnx")
         val cats = pixels(fetchImage("http://images.cocodataset.org/val2017/000000039769.jpg", "cats.jpg"))
         val pictures = mapOf("cats" to cats, "red" to solid(0xD01818), "blue" to solid(0x1830D0))
         val phrases = listOf("two cats", "a red hat", "a car", "red", "blue", "a beach at sunset")
+        // Pinned in the app (SmartSearch): fail loudly if Hugging Face's files ever change.
+        val pinned = mapOf(
+            "tokenizer.json" to "72ed5c96db5729294468543e4bc75fce14ca63f58e37300290189ba1c1e52b85",
+            "onnx/vision_model.onnx" to "17d3c037b1d488c10c50e09f6009ea5a198caef4e0e8f4ea5617b7cb2d067ac0",
+            "onnx/text_model_quantized.onnx" to "b8557b10e5c23a0126c6d2e6eba48d240484979007917d128953b31618a04211",
+        )
+        for ((path, sha) in pinned) {
+            val f = download(path)
+            val actual = MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+            assertTrue("$path changed: $actual", actual == sha)
+        }
 
         var fullVision: Map<String, FloatArray>? = null
-        for (visionFile in visionCandidates.reversed()) {
+        for (visionFile in visionCandidates) {
             ClipModel(download(visionFile), download(textFile), tok).use { model ->
                 val t0 = System.nanoTime()
                 val img = pictures.mapValues { (_, p) -> model.embedImage(ImagePrep.toChw(p.first, p.second, p.third)) }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -60,6 +62,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import io.github.drtron1c.cloudphotos.BuildConfig
+import io.github.drtron1c.cloudphotos.ai.ModelState
+import io.github.drtron1c.cloudphotos.update.UpdateState
+import io.github.drtron1c.cloudphotos.vpn.VpnState
 import io.github.drtron1c.cloudphotos.settings.AppIdentity
 import io.github.drtron1c.cloudphotos.settings.AppSettings
 import io.github.drtron1c.cloudphotos.work.AutoUploadWorker
@@ -161,6 +166,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         }
                     }
                 }
+                Divider()
+                ToggleRow(
+                    "Liquid Glass",
+                    if (glassSupported()) "iOS 26-style see-through glass bars, buttons and banners" else "Needs Android 12 or newer",
+                    s.liquidGlass,
+                    enabled = glassSupported(),
+                ) { s.liquidGlass = it }
                 Divider()
                 ToggleRow("Tab bar labels", "Show names under the Library, Albums and Search icons", s.tabLabels) { s.tabLabels = it }
                 Divider()
@@ -298,6 +310,18 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             // ---------- Privacy ----------
             Group("Privacy & security") {
+                val vpnState by vm.vpn.state.collectAsState()
+                val vpnAccount by vm.vpn.account.collectAsState()
+                ValueRow(
+                    "Proton VPN",
+                    when {
+                        vpnAccount == null -> "Not set up"
+                        vpnState is VpnState.Connected -> "Connected · " + (vpnState as VpnState.Connected).server.country
+                        vpnState is VpnState.Connecting -> "Connecting…"
+                        else -> "Off"
+                    },
+                ) { vm.open(Route.Vpn) }
+                Divider()
                 ValueRow("Encrypted DNS", DNS_OPTIONS.firstOrNull { it.first == s.dnsProvider }?.second ?: s.dnsProvider) { dialog = "dns" }
                 Divider()
                 ToggleRow(
@@ -337,6 +361,53 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     "servers and how much data moves — use a VPN if you want to hide that as well. The app has no web browser inside it, " +
                     "so nothing you view is ever saved in any browser history."
             )
+
+            // ---------- Smart search ----------
+            Group("Smart Search (on-device AI)") {
+                val modelState by vm.smart.modelState.collectAsState()
+                val analysed by vm.smart.indexed.collectAsState()
+                ToggleRow(
+                    "Search what's in photos",
+                    "e.g. “red hat late 2026”. One-time ${megabytes(vm.smart.downloadSize)} download, then everything runs on this device",
+                    s.aiSearch,
+                ) { vm.setAiSearch(it) }
+                if (s.aiSearch) {
+                    Divider()
+                    val status = remember(tick, modelState, analysed) {
+                        when (modelState) {
+                            is ModelState.Downloading -> "Downloading the model… ${megabytes((modelState as ModelState.Downloading).bytes)} of ${megabytes(vm.smart.downloadSize)}"
+                            is ModelState.Failed -> "Download failed: ${(modelState as ModelState.Failed).message}"
+                            else -> vm.aiStatus().ifBlank { "%,d photos analysed".format(analysed) }
+                        }
+                    }
+                    Text(status, color = p.secondaryLabel, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+                    Divider()
+                    ToggleRow("Only while charging", "Analyse photos only when plugged in", s.aiChargingOnly) { vm.setAiChargingOnly(it) }
+                }
+                if (s.aiSearch || analysed > 0 || modelState !is ModelState.Missing) {
+                    Divider()
+                    ActionRow("Delete AI Model and Analysis", p.destructive) { vm.deleteAiData() }
+                }
+            }
+            Footer("Photos are analysed from their small thumbnails on this device. Nothing about your photos or searches is sent anywhere; the model comes from Hugging Face (Apple's MobileCLIP).")
+
+            // ---------- Updates ----------
+            Group("Updates") {
+                val update by vm.updates.state.collectAsState()
+                Column(Modifier.padding(16.dp)) {
+                    Text("Installed: build ${BuildConfig.VERSION_CODE}", color = p.label, fontSize = 17.sp)
+                    Text(
+                        updateStatusLine(update, System.currentTimeMillis()),
+                        color = if (update is UpdateState.Failed) p.destructive else p.secondaryLabel, fontSize = 13.sp,
+                    )
+                }
+                Divider()
+                ActionRow("Check for Updates", p.accent) { vm.updates.checkNow() }
+                Divider()
+                ToggleRow("Check when the app opens", "Shows a banner at the top when a newer build is on GitHub", s.checkUpdates) { s.checkUpdates = it }
+                Divider()
+                ActionRow("Change Log", p.accent) { dialog = "changelog" }
+            }
 
             // ---------- Sign-in ----------
             Group("Sign-in") {
@@ -382,6 +453,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             confirmButton = { TextButton(onClick = { vm.setAutoUpload(true, fromNow = true); dialog = null }) { Text("From Now On") } },
             dismissButton = { TextButton(onClick = { vm.setAutoUpload(true, fromNow = false); dialog = null }) { Text("Everything") } },
         )
+        "changelog" -> {
+            val entries = remember { loadChangelog(context) }
+            AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("Change Log") },
+                text = {
+                    Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                        ChangeList(entries, showHeadings = true)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { dialog = null }) { Text("Close") } },
+            )
+        }
         "clearoffline" -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text("Remove offline copies?") },

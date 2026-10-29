@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +48,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -65,10 +68,26 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import io.github.drtron1c.cloudphotos.photos.AlbumKind
 import io.github.drtron1c.cloudphotos.photos.MediaList
+import io.github.drtron1c.cloudphotos.vpn.VpnState
 
 @Composable
 fun AppRoot(vm: MainViewModel) {
     val activity = LocalContext.current.findActivity() as? FragmentActivity
+    val vpnState by vm.vpn.state.collectAsState()
+    // Android asks once whether Cloud Photos may run a VPN.
+    val vpnPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        vm.vpn.onPermissionResult(r.resultCode == android.app.Activity.RESULT_OK)
+    }
+    LaunchedEffect(vpnState) {
+        if (vpnState is VpnState.NeedsPermission) {
+            val intent = vm.vpn.permissionIntent()
+            if (intent == null) vm.vpn.onPermissionResult(true)
+            else {
+                vm.expectingExternal = true
+                vpnPermission.launch(intent)
+            }
+        }
+    }
     Box(Modifier.fillMaxSize()) {
         when (val ph = vm.phase) {
             Phase.Starting -> SplashScreen()
@@ -78,6 +97,7 @@ fun AppRoot(vm: MainViewModel) {
             is Phase.Failed -> FailedScreen(ph.message, vm, onRetry = { vm.retryStartup() }, onSignOut = { vm.signOut() })
             Phase.Ready -> MainScreen(vm)
         }
+        VpnBanner(vm, vpnState, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (vm.phase == Phase.Ready) 60.dp else 6.dp))
         if (vm.locked && vm.settings.lockApp) {
             val unlock = {
                 if (activity != null) {
@@ -109,16 +129,20 @@ fun MainScreen(vm: MainViewModel) {
     BackHandler(enabled = vm.stack.isNotEmpty()) { vm.back() }
     BackHandler(enabled = vm.stack.isEmpty() && vm.tab != Tab.Library) { vm.selectTab(Tab.Library) }
 
-    Box(Modifier.fillMaxSize().background(p.background)) {
-        saveable.SaveableStateProvider(vm.tab.name + vm.zone + vm.settings.newestOnTop) {
-            when (vm.tab) {
-                Tab.Library -> LibraryTab(vm, onUploadClick = pickToUpload)
-                Tab.Albums -> AlbumsTab(vm)
-                Tab.Search -> SearchTab(vm)
+    // Everything is the backdrop for the banners' glass; the tabs are the tab bar's backdrop.
+    GlassHost(Modifier.fillMaxSize().background(p.background), content = {
+        GlassHost(Modifier.fillMaxSize(), content = {
+            saveable.SaveableStateProvider(vm.tab.name + vm.zone + vm.settings.newestOnTop) {
+                when (vm.tab) {
+                    Tab.Library -> LibraryTab(vm, onUploadClick = pickToUpload)
+                    Tab.Albums -> AlbumsTab(vm)
+                    Tab.Search -> SearchTab(vm)
+                }
             }
-        }
-        if (!(vm.tab == Tab.Library && vm.librarySelecting)) {
-            TabBar(vm, navBottom, Modifier.align(Alignment.BottomCenter))
+        }) {
+            if (!(vm.tab == Tab.Library && vm.librarySelecting)) {
+                TabBar(vm, navBottom, Modifier.align(Alignment.BottomCenter))
+            }
         }
 
         vm.stack.forEachIndexed { i, route ->
@@ -148,7 +172,19 @@ fun MainScreen(vm: MainViewModel) {
                     Route.Settings -> SettingsScreen(vm) { vm.back() }
                     Route.AllAlbums -> AllAlbumsScreen(vm) { vm.back() }
                     Route.AppIdentity -> IdentityScreen(vm) { vm.back() }
+                    Route.Vpn -> VpnScreen(vm) { vm.back() }
                 }
+            }
+        }
+    }) {
+        // Liquid Glass banners at the top: update available / what's new / VPN.
+        Column(
+            Modifier.align(Alignment.TopCenter).padding(top = statusTop + 6.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            UpdateBanner(vm.updates)
+            if (vm.whatsNew.isNotEmpty()) {
+                WhatsNewBanner(vm.whatsNew, io.github.drtron1c.cloudphotos.BuildConfig.VERSION_CODE, onDismiss = { vm.dismissWhatsNew() })
             }
         }
 
@@ -186,7 +222,7 @@ fun MainScreen(vm: MainViewModel) {
 
         SnackbarHost(
             snackbar,
-            Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + 8.dp),
+            Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + 20.dp),
         )
 
         val busy = vm.busy
@@ -257,20 +293,19 @@ private fun AlbumGrid(vm: MainViewModel, list: MediaList) {
 
 @Composable
 private fun TabBar(vm: MainViewModel, navBottom: Dp, modifier: Modifier) {
-    val p = LocalPalette.current
     val labels = vm.settings.tabLabels
-    Column(modifier.fillMaxWidth().background(p.bar)) {
-        HorizontalDivider(thickness = 0.5.dp, color = p.separator)
-        Row(
-            Modifier.fillMaxWidth().height(TAB_BAR_HEIGHT.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TabItem(Icons.Filled.PhotoLibrary, "Library", labels, vm.tab == Tab.Library) { vm.selectTab(Tab.Library) }
-            TabItem(Icons.Filled.Collections, "Albums", labels, vm.tab == Tab.Albums) { vm.selectTab(Tab.Albums) }
-            TabItem(Icons.Filled.Search, "Search", labels, vm.tab == Tab.Search) { vm.selectTab(Tab.Search) }
+    Box(modifier.fillMaxWidth()) {
+        GlassBar(navBottom) {
+            Row(
+                Modifier.fillMaxWidth().height(TAB_BAR_HEIGHT.dp).padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TabItem(Icons.Filled.PhotoLibrary, "Library", labels, vm.tab == Tab.Library) { vm.selectTab(Tab.Library) }
+                TabItem(Icons.Filled.Collections, "Albums", labels, vm.tab == Tab.Albums) { vm.selectTab(Tab.Albums) }
+                TabItem(Icons.Filled.Search, "Search", labels, vm.tab == Tab.Search) { vm.selectTab(Tab.Search) }
+            }
         }
-        Spacer(Modifier.height(navBottom))
     }
 }
 
@@ -278,8 +313,11 @@ private fun TabBar(vm: MainViewModel, navBottom: Dp, modifier: Modifier) {
 private fun TabItem(icon: ImageVector, label: String, showLabel: Boolean, selected: Boolean, onClick: () -> Unit) {
     val p = LocalPalette.current
     val tint = if (selected) p.accent else p.secondaryLabel
+    val glass = LocalGlassEnabled.current
     Column(
         Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (glass && selected) p.accent.copy(alpha = 0.14f) else Color.Transparent)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

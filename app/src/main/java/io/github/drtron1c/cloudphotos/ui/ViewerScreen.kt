@@ -68,6 +68,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -193,8 +194,12 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
     val fade = 1f - (flick.offsetFraction * 1.6f).coerceIn(0f, 1f)
     val dragging = flick.gestureState !is FlickToDismissState.GestureState.Idle
 
+    // The photo is the backdrop for the glass bars.
+    val viewerGlass = if (LocalGlassEnabled.current) rememberGlassBackdrop() else null
+    val glassOn = viewerGlass != null
+    CompositionLocalProvider(LocalGlassBackdrop provides viewerGlass) {
     Box(Modifier.fillMaxSize().background(baseBg.copy(alpha = fade))) {
-        FlickToDismiss(state = flick, modifier = Modifier.fillMaxSize()) {
+        FlickToDismiss(state = flick, modifier = Modifier.fillMaxSize().glassSource(viewerGlass)) {
             HorizontalPager(
                 state = pager,
                 beyondViewportPageCount = 1,
@@ -235,7 +240,12 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
             enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            Column(Modifier.fillMaxWidth().background(p.bar).padding(top = statusTop)) {
+            GlassSurface(
+                if (glassOn) Modifier.padding(top = statusTop + 6.dp, start = 10.dp, end = 10.dp).fillMaxWidth() else Modifier.fillMaxWidth(),
+                cornerRadius = if (glassOn) 26.dp else 0.dp,
+                elevation = if (glassOn) 8.dp else 0.dp,
+            ) {
+            Column(Modifier.fillMaxWidth().padding(top = if (glassOn) 0.dp else statusTop)) {
                 Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBackIos, "Back", tint = p.accent)
@@ -321,6 +331,7 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                     )
                 }
             }
+            }
         }
 
         // Bottom toolbar
@@ -329,11 +340,10 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
             enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
+            GlassBar(navBottom) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(p.bar)
-                    .padding(bottom = navBottom)
                     .height(56.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
@@ -376,7 +386,9 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                     }
                 }
             }
+            }
         }
+    }
     }
 
     val current = list[pager.currentPage]

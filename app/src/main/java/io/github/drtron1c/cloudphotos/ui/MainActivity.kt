@@ -9,6 +9,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.fragment.app.FragmentActivity
 import io.github.drtron1c.cloudphotos.identity.CustomLauncher
@@ -32,7 +33,9 @@ class MainActivity : FragmentActivity() {
             }
             LaunchedEffect(s.hideInRecents) { applyRecentsPrivacy(s.hideInRecents) }
             LaunchedEffect(s.customName, vm.identityVersion) { applyTaskIdentity(s.customName.trim()) }
-            CloudPhotosTheme(themeMode = s.themeMode, accentIndex = s.accent) { AppRoot(vm) }
+            CloudPhotosTheme(themeMode = s.themeMode, accentIndex = s.accent) {
+                CompositionLocalProvider(LocalGlassEnabled provides (s.liquidGlass && glassSupported())) { AppRoot(vm) }
+            }
         }
     }
 
@@ -72,6 +75,7 @@ class MainActivity : FragmentActivity() {
         super.onStop()
         if (!isChangingConfigurations) {
             vm.applyLauncherChanges()
+            vm.onLeftApp()
             vm.onBackgrounded()
         }
     }

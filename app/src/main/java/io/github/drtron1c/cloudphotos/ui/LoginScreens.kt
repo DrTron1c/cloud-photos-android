@@ -341,6 +341,9 @@ fun FailedScreen(message: String, vm: MainViewModel, onRetry: () -> Unit, onSign
             Text("Try Again", fontSize = 17.sp)
         }
         Spacer(Modifier.height(8.dp))
+        if (vm.settings.vpnRequire && vm.vpn.account.value != null) {
+            TextButton(onClick = { vm.continueWithoutRequiringVpn() }) { Text("Continue without the VPN") }
+        }
         TextButton(onClick = { dnsDialog = true }) { Text("Network privacy settings") }
         TextButton(onClick = onSignOut, colors = ButtonDefaults.textButtonColors(contentColor = p.destructive)) {
             Text("Sign Out")

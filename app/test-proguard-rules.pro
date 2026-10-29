@@ -7,3 +7,7 @@
 -keep class androidx.test.** { *; }
 -keep class org.junit.** { *; }
 -keep class junit.** { *; }
+-keep class androidx.compose.ui.test.** { *; }
+-dontwarn androidx.compose.**
+-dontwarn kotlinx.coroutines.**
+-dontwarn org.jetbrains.annotations.**

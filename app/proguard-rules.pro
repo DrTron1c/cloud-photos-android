@@ -14,3 +14,8 @@
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault,Signature,InnerClasses,EnclosingMethod
 -dontwarn com.android.apksig.**
 -dontwarn javax.annotation.**
+
+# WireGuard (JNI into the Go backend) and ONNX Runtime (JNI).
+-keep class com.wireguard.** { *; }
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**

@@ -126,7 +126,11 @@ class ClipModel(visionModel: File, textModel: File, private val tokenizer: ClipT
         }
     }
 
-    /** How padding after the end token is filled (0 or the end token itself). */
+    /**
+     * Padding after the end token. MobileCLIP finds the end token with argmax over the ids, so
+     * padding must be 0 (padding with the end token itself makes every phrase look the same —
+     * found by the CI test).
+     */
     var padWithZero = true
     var useMask = true
 

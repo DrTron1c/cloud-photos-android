@@ -136,6 +136,9 @@
             android:name=".identity.InstallResultReceiver"
             android:exported="false" />
         <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".identity.LauncherWatcher"
             android:exported="true">
             <intent-filter>

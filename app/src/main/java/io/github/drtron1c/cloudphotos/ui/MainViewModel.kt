@@ -12,7 +12,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.drtron1c.cloudphotos.BuildConfig
+import io.github.drtron1c.cloudphotos.ai.ModelState
+import io.github.drtron1c.cloudphotos.ai.SmartIndexWorker
 import io.github.drtron1c.cloudphotos.CloudPhotosApp
+import io.github.drtron1c.cloudphotos.update.ChangeEntry
+import io.github.drtron1c.cloudphotos.update.Changelog
+import io.github.drtron1c.cloudphotos.vpn.VpnState
 import io.github.drtron1c.cloudphotos.auth.AuthException
 import io.github.drtron1c.cloudphotos.auth.AuthOutcome
 import io.github.drtron1c.cloudphotos.auth.CodeDelivery
@@ -82,6 +88,7 @@ sealed interface Route {
     data object Settings : Route
     data object AllAlbums : Route
     data object AppIdentity : Route
+    data object Vpn : Route
 }
 
 enum class Tab { Library, Albums, Search }
@@ -100,6 +107,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings = graph.settings
     val imageLoader get() = graph.imageLoader
     val http get() = graph.http
+    val vpn get() = graph.vpn
+    val updates get() = graph.updates
     private val prefs get() = graph.prefs
 
     var phase by mutableStateOf<Phase>(Phase.Starting)
@@ -165,6 +174,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val lists = HashMap<String, MediaList>()
     private val reauthMutex = Mutex()
 
+    /** Change-log sections to announce after an update (declared before init, which fills it). */
+    var whatsNew by mutableStateOf<List<ChangeEntry>>(emptyList())
+
     // Your own app name & icon (declared before init, which reads them).
     /** Picture handed over by the viewer's "Use as App Icon". */
     var iconSource by mutableStateOf<Any?>(null)
@@ -182,6 +194,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         recentlyViewed = loadRecentlyViewed()
         refreshOffline()
         refreshCompanion()
+        loadWhatsNew()
+        updates.checkOnLaunch()
+        if (settings.aiSearch) {
+            viewModelScope.launch { smart.index() }
+            SmartIndexWorker.start(getApplication(), settings)
+        }
         viewModelScope.launch { startup() }
         viewModelScope.launch {
             CustomLauncher.events.collect {
@@ -208,6 +226,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun startup() {
         phase = Phase.Starting
         val auth = graph.auth
+        // Proton VPN first, so nothing reaches the network outside it.
+        if (vpn.shouldAutoConnect()) {
+            val ok = vpn.connect()
+            if (!ok && settings.vpnRequire) {
+                phase = Phase.Failed(
+                    "Proton VPN couldn't connect, and “Only use the internet through the VPN” is on, so Cloud Photos is waiting. " +
+                        ((vpn.state.value as? VpnState.Failed)?.message ?: "")
+                )
+                return
+            }
+        }
         try {
             if (auth.resume()) {
                 afterSignedIn(); return
@@ -537,6 +566,86 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = SearchQuery.parse(query) ?: return null
         return virtualList("search:" + query.trim().lowercase(), query.trim(), "search") { m.matches(it, zoneId) }
     }
+
+    /** Smart search is on and has analysed photos. */
+    val smartReady: Boolean get() = settings.aiSearch && smart.modelState.value is ModelState.Ready && smart.indexed.value > 0
+
+    /**
+     * Search and open the results. File names win when they match (e.g. "IMG_1234"); otherwise,
+     * with on-device AI search on, the words are matched against what's in the pictures.
+     */
+    fun runSearch(query: String) {
+        val m = SearchQuery.parse(query) ?: return
+        if (!indexMatchesLibrary) {
+            toast("Still organising your library… ${(index.progress * 100).toInt()}%")
+            return
+        }
+        val byName = index.entries.count { m.matches(it, zoneId) }
+        if (!m.hasPhrase || byName > 0 || !smartReady) {
+            search(query)?.let { openList(it) }
+            if (byName == 0 && m.hasPhrase && settings.aiSearch && !smartReady) {
+                toast("On-device AI search is still getting ready — see Settings › Smart Search")
+            }
+            return
+        }
+        viewModelScope.launch {
+            busy = "Searching…"
+            try {
+                val candidates = index.entries.filter { m.matchesFilters(it, zoneId) }.map { it.id }
+                val (ranked, confident) = smart.rank(m.phrase, candidates)
+                busy = null
+                if (ranked.isEmpty()) {
+                    toast("Nothing found for “${query.trim()}”")
+                    return@launch
+                }
+                val score = ranked.withIndex().associate { it.value.first to it.index }
+                val list = virtualList(
+                    "smart:" + query.trim().lowercase(), query.trim(), "search",
+                    order = { matches -> matches.sortedBy { score[it.value.id] ?: Int.MAX_VALUE } },
+                ) { it.id in score }
+                if (list != null) {
+                    if (!confident) toast("No clear matches — showing the closest photos")
+                    openList(list)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                busy = null
+                toast("Smart search failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    val smart get() = graph.smart
+
+    fun setAiSearch(on: Boolean) {
+        settings.aiSearch = on
+        val app = getApplication<Application>()
+        if (on) {
+            viewModelScope.launch { smart.index() }
+            SmartIndexWorker.start(app, settings)
+        } else SmartIndexWorker.stop(app)
+    }
+
+    fun setAiChargingOnly(on: Boolean) {
+        settings.aiChargingOnly = on
+        val app = getApplication<Application>()
+        if (settings.aiSearch) {
+            SmartIndexWorker.stop(app)
+            SmartIndexWorker.start(app, settings)
+        }
+    }
+
+    fun deleteAiData() {
+        val app = getApplication<Application>()
+        SmartIndexWorker.stop(app)
+        settings.aiSearch = false
+        smart.deleteAll()
+        prefs.edit().remove(Keys.AI_STATUS).apply()
+        toast("On-device AI data deleted")
+    }
+
+    fun aiStatus(): String = prefs.getString(Keys.AI_STATUS, "") ?: ""
 
     fun searchCount(query: String): Int {
         val m = SearchQuery.parse(query) ?: return 0
@@ -1123,6 +1232,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Back in the app after a while: pick up photos taken on the iPhone meanwhile. */
     fun onForeground() {
+        vpn.onAppOpened()
+        updates.onAppForeground()
+        updates.checkOnForeground()
         refreshOffline()
         if (phase != Phase.Ready || offlineMode) return
         val now = System.currentTimeMillis()
@@ -1136,6 +1248,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!expectingExternal) AppIdentity.applyAll(getApplication(), settings)
     }
 
+    /** Leaving the app: "Disconnect when you leave" (not when just opening a picker, share sheet or installer). */
+    fun onLeftApp() {
+        if (!expectingExternal && !updates.isHandingOff()) vpn.onAppLeft()
+    }
+
+    /** Settings › Proton VPN › "Only use the internet through the VPN" made start-up wait: switch it off and go. */
+    fun continueWithoutRequiringVpn() {
+        settings.vpnRequire = false
+        retryStartup()
+    }
+
+    // ---------------- updates / what's new ----------------
+
+    private fun loadWhatsNew() {
+        val app = getApplication<Application>()
+        if (settings.lastSeenChangelog == 0 && graph.authState.appleId.isBlank()) {
+            // Fresh install: nothing is "new" yet.
+            settings.lastSeenChangelog = BuildConfig.VERSION_CODE
+            return
+        }
+        whatsNew = Changelog.unseen(loadChangelog(app), settings.lastSeenChangelog, BuildConfig.VERSION_CODE)
+    }
+
+    fun dismissWhatsNew() {
+        settings.lastSeenChangelog = BuildConfig.VERSION_CODE
+        whatsNew = emptyList()
+    }
+
     fun onBackgrounded() {
         if (expectingExternal) {
             expectingExternal = false
@@ -1145,12 +1285,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-/** Plain-language search over the library index: dates, months, years, file names and types. */
+/**
+ * Plain-language search over the library index: dates ("late 2026", "summer 2025", "last month",
+ * "christmas"), file names and types. Words that aren't dates or types are, with on-device AI
+ * search on, matched against what's in the pictures ([phrase]).
+ */
 class SearchQuery private constructor(
-    private val year: Int?,
-    private val month: Int?,
-    private val day: Int?,
-    private val exact: LocalDate?,
+    private val dateTests: List<(LocalDate) -> Boolean>,
     private val video: Boolean?,
     private val favourite: Boolean,
     private val edited: Boolean,
@@ -1158,45 +1299,81 @@ class SearchQuery private constructor(
     private val located: Boolean,
     private val words: List<String>,
 ) {
-    fun matches(e: IndexEntry, zone: ZoneId): Boolean {
+    /** What's left for picture-content search, e.g. "red hat". */
+    val phrase: String = words.filter { it !in STOP_WORDS }.joinToString(" ")
+    val hasPhrase get() = phrase.isNotBlank()
+
+    /** Dates / types / flags only (no file-name words). */
+    fun matchesFilters(e: IndexEntry, zone: ZoneId): Boolean {
         if (video != null && e.video != video) return false
         if (favourite && !e.favourite) return false
         if (edited && !e.edited) return false
         if (png && !e.name.lowercase().endsWith(".png")) return false
         if (located && (e.lat == null || e.lon == null)) return false
-        if (year != null || month != null || day != null || exact != null) {
+        if (dateTests.isNotEmpty()) {
             val d = Instant.ofEpochMilli(e.date).atZone(zone).toLocalDate()
-            if (exact != null && d != exact) return false
-            if (year != null && d.year != year) return false
-            if (month != null && d.monthValue != month) return false
-            if (day != null && d.dayOfMonth != day) return false
+            if (!dateTests.all { it(d) }) return false
         }
+        return true
+    }
+
+    fun matches(e: IndexEntry, zone: ZoneId): Boolean {
+        if (!matchesFilters(e, zone)) return false
         val name = e.name.lowercase()
-        return words.all { name.contains(it) }
+        return words.filter { it !in STOP_WORDS }.all { name.contains(it) }
     }
 
     companion object {
-        fun parse(query: String): SearchQuery? {
+        fun parse(query: String, today: LocalDate = LocalDate.now()): SearchQuery? {
             val tokens = query.lowercase().split(Regex("[\\s,./-]+")).filter { it.isNotBlank() }
             if (tokens.isEmpty()) return null
             var year: Int? = null
             var month: Int? = null
             var day: Int? = null
             var exact: LocalDate? = null
+            var range: ClosedRange<LocalDate>? = null
+            var part: IntRange? = null      // months of the year: early / mid / late
+            var season: Set<Int>? = null    // months
+            var christmas = false
+            var weekend = false
             var video: Boolean? = null
             var fav = false
             var edited = false
             var png = false
             var located = false
             val words = ArrayList<String>()
-            val today = LocalDate.now()
-            for (t in tokens) {
+            var i = 0
+            while (i < tokens.size) {
+                val t = tokens[i]
+                val next = tokens.getOrNull(i + 1)
                 val n = t.toIntOrNull()
                 when {
                     n != null && n in 1900..2100 -> year = n
                     n != null && n in 1..31 -> day = n
+                    t.matches(Regex("(19|20)\\d\\ds")) -> {
+                        val start = t.dropLast(1).toInt()
+                        range = LocalDate.of(start, 1, 1)..LocalDate.of(start + 9, 12, 31)
+                    }
                     t == "today" -> exact = today
                     t == "yesterday" -> exact = today.minusDays(1)
+                    (t == "this" || t == "last" || t == "past") && next in setOf("year", "month", "week") -> {
+                        val back = if (t == "this") 0L else 1L
+                        range = when (next) {
+                            "year" -> today.minusYears(back).withDayOfYear(1).let { it..it.plusYears(1).minusDays(1) }
+                            "month" -> today.minusMonths(back).withDayOfMonth(1).let { it..it.plusMonths(1).minusDays(1) }
+                            else -> today.minusWeeks(back).with(java.time.DayOfWeek.MONDAY).let { it..it.plusDays(6) }
+                        }
+                        i++
+                    }
+                    t in setOf("early", "beginning", "start") -> part = 1..4
+                    t in setOf("mid", "middle") -> part = 5..8
+                    t in setOf("late", "end") -> part = 9..12
+                    t == "spring" -> season = setOf(3, 4, 5)
+                    t == "summer" -> season = setOf(6, 7, 8)
+                    t == "autumn" || t == "fall" -> season = setOf(9, 10, 11)
+                    t == "winter" -> season = setOf(12, 1, 2)
+                    t == "christmas" || t == "xmas" -> christmas = true
+                    t == "weekend" || t == "weekends" -> weekend = true
                     t in setOf("video", "videos", "movie", "movies", "clip", "clips") -> video = true
                     t in setOf("photo", "photos", "picture", "pictures", "pic", "pics", "image", "images") -> video = false
                     t in setOf("favourite", "favourites", "favorite", "favorites", "fav", "favs", "loved", "liked") -> fav = true
@@ -1206,9 +1383,27 @@ class SearchQuery private constructor(
                     monthIndex(t) >= 0 -> month = monthIndex(t) + 1
                     else -> words += t
                 }
+                i++
             }
-            return SearchQuery(year, month, day, exact, video, fav, edited, png, located, words)
+            val tests = ArrayList<(LocalDate) -> Boolean>()
+            exact?.let { e -> tests.add { it == e } }
+            range?.let { r -> tests.add { it in r } }
+            year?.let { y -> tests.add { it.year == y } }
+            month?.let { m -> tests.add { it.monthValue == m } }
+            day?.let { dd -> tests.add { it.dayOfMonth == dd } }
+            part?.let { p -> tests.add { it.monthValue in p } }
+            season?.let { ss -> tests.add { it.monthValue in ss } }
+            if (christmas) tests.add { it.monthValue == 12 && it.dayOfMonth in 20..31 }
+            if (weekend) tests.add { it.dayOfWeek == java.time.DayOfWeek.SATURDAY || it.dayOfWeek == java.time.DayOfWeek.SUNDAY }
+            // "late" with no year means late this year.
+            if ((part != null || season != null) && year == null && range == null && exact == null) {
+                val y = today.year
+                tests.add { it.year == y || (season == setOf(12, 1, 2) && it.year == y - 1 && it.monthValue == 12) }
+            }
+            return SearchQuery(tests, video, fav, edited, png, located, words)
         }
+
+        private val STOP_WORDS = setOf("in", "on", "at", "from", "during", "of", "the", "a", "an", "with", "and", "my", "me", "taken", "around", "time")
 
         private val FULL = listOf(
             "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",

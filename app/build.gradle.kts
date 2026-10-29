@@ -17,6 +17,9 @@ android {
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Phones/tablets (arm64) and the test emulator (x86_64) only: keeps the AI and VPN
+        // native libraries from bloating the APK.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     // On-device tests run against a shrunk build identical to release (plus the Kotlin
@@ -119,6 +122,16 @@ dependencies {
     // Signs the companion app on the device.
     implementation("com.android.tools.build:apksig:8.7.3")
 
+    // Proton VPN over WireGuard (the official WireGuard library).
+    implementation("com.wireguard.android:tunnel:1.0.20230706")
+
+    // On-device AI search: CLIP-style model run with ONNX Runtime.
+    implementation(project(":aicore"))
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    "releaseTestImplementation"("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("junit:junit:4.13.2")

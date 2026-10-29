@@ -102,12 +102,19 @@ class PrivateDns(private val prefs: SharedPreferences) : Dns {
     }
 }
 
-fun buildHttpClient(cookieJar: PersistentCookieJar, authState: AuthState, prefs: SharedPreferences): OkHttpClient =
+fun buildHttpClient(
+    cookieJar: PersistentCookieJar,
+    authState: AuthState,
+    prefs: SharedPreferences,
+    /** False = "Only use iCloud through the VPN" is on and the VPN isn't up: don't send anything. */
+    vpnGate: () -> Boolean = { true },
+): OkHttpClient =
     OkHttpClient.Builder()
         .dns(PrivateDns(prefs))
         .cookieJar(cookieJar)
         .addInterceptor(Interceptor { chain ->
             val req = chain.request()
+            if (!vpnGate()) throw java.io.IOException("Proton VPN isn't connected (and “Only use the internet through the VPN” is on).")
             val b = req.newBuilder()
             if (req.header("User-Agent") == null) b.header("User-Agent", USER_AGENT)
             val host = req.url.host

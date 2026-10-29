@@ -93,8 +93,23 @@ fun Pill(
     onClick: () -> Unit,
 ) {
     val p = LocalPalette.current
-    val bg = if (onDark) Color.Black.copy(alpha = 0.38f) else p.card.copy(alpha = 0.9f)
     val fg = if (onDark) Color.White else p.accent
+    if (LocalGlassEnabled.current) {
+        // Liquid Glass capsule.
+        GlassSurface(modifier, cornerRadius = null, dark = if (onDark) true else null) {
+            Row(
+                Modifier
+                    .clickable(onClick = onClick)
+                    .padding(if (text != null) PaddingValues(horizontal = 15.dp, vertical = 8.dp) else PaddingValues(8.dp)),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) Icon(icon, text, tint = fg, modifier = Modifier.size(20.dp))
+                if (text != null) Text(text, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        return
+    }
+    val bg = if (onDark) Color.Black.copy(alpha = 0.38f) else p.card.copy(alpha = 0.9f)
     Row(
         modifier
             .clip(CircleShape)
