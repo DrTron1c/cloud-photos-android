@@ -694,7 +694,7 @@ private fun LocationSheet(vm: MainViewModel, asset: Asset, onClose: () -> Unit) 
             ) {
                 Text("Show a map?", color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "The map pictures (OpenStreetMap data) come from CARTO: their servers see which map areas you look at — never your photos. Place names are in English.",
+                    "The map pictures come from Esri (ArcGIS): their servers see which map areas you look at — never your photos. Place names are in English.",
                     color = p.secondaryLabel, fontSize = 13.sp,
                 )
                 TextButton(onClick = { s.placesMap = true }) { Text("Show Map") }

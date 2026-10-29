@@ -459,7 +459,7 @@ fun PlacesScreen(vm: MainViewModel, onBack: () -> Unit) {
                 item {
                     InfoCard(
                         Icons.Outlined.Map, "Show a map?",
-                        "Places below are named on this device (no server needed). A map needs map pictures (OpenStreetMap data, served by CARTO): " +
+                        "Places below are named on this device (no server needed). A map needs map pictures from Esri: " +
                             "their servers see which map areas you look at — never your photos. Place names on the map are in English.",
                         "Show Map",
                     ) { s.placesMap = true; showMap = true }
@@ -486,7 +486,7 @@ fun PlacesScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
             item {
                 Text(
-                    "Place names: GeoNames (CC BY 4.0). Map: © OpenStreetMap contributors © CARTO.",
+                    "Place names: GeoNames (CC BY 4.0). Map: Esri, HERE, Garmin, © OpenStreetMap contributors.",
                     color = p.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(18.dp),
                 )
             }

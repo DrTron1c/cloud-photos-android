@@ -64,6 +64,10 @@ adb shell settings put system user_rotation 0; sleep 3
 adb shell input keyevent KEYCODE_HOME; sleep 3
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 6; shot 6-reopened
 
+# The map pictures load without any API key (status, type, size).
+curl -s -o /tmp/tile -w "esri %{http_code} %{content_type} %{size_download}\n" "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/6/24/36" > $OUT/map-tiles.txt 2>&1 || true
+cp /tmp/tile $OUT/map-tile-sample 2>/dev/null || true
+
 # Long-press app shortcuts are published; the Quick Settings tile opens the app; keyboard keys don't crash.
 adb shell dumpsys shortcut 2>/dev/null | grep -A40 "Package: $PKG" | grep -oE "id=(search|favourites|memories|upload)" | sort -u > $OUT/shortcuts.txt
 adb shell cmd statusbar add-tile $PKG/.vpn.VpnTileService > $OUT/tile.txt 2>&1

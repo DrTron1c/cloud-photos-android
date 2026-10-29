@@ -66,9 +66,9 @@ object Mercator {
 }
 
 /**
- * A small map drawn by the app itself (OpenStreetMap data, CARTO's label-free map pictures, place
+ * A small map drawn by the app itself (Esri's label-free light grey map pictures, place
  * names in English from the app's own town list). Map pictures load through the same
- * encrypted-DNS (and VPN) connection as everything else; CARTO's servers see which map squares
+ * encrypted-DNS (and VPN) connection as everything else; Esri's servers see which map squares
  * are shown — never your photos. Pinch to zoom, drag to move, tap a bubble to open it.
  */
 @Composable
@@ -123,7 +123,8 @@ fun OsmMap(
                 },
         ) {
             // Tiles at the nearest whole zoom level, scaled to fit the zoom in between.
-            val tz = floor(zoom).toInt().coerceIn(0, 19)
+            // Esri's grey base map goes to level 16; closer in, those tiles are enlarged.
+            val tz = floor(zoom).toInt().coerceIn(0, 16)
             val n = 1 shl tz
             val tileOnScreen = (world / n).toFloat()
             val left = cx * world - w / 2
@@ -136,7 +137,7 @@ fun OsmMap(
             for (ty in y0..y1) for (tx in x0..x1) {
                 val wx = Math.floorMod(tx, n)
                 // Map pictures without writing on them; the place names are drawn by the app, in English.
-                val url = "https://${"abcd"[Math.floorMod(wx + ty, 4)]}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/$tz/$wx/$ty@2x.png"
+                val url = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/$tz/$ty/$wx"
                 val ox = (tx * tileOnScreen - left).roundToInt()
                 val oy = (ty * tileOnScreen - top).roundToInt()
                 AsyncImage(
@@ -241,7 +242,7 @@ fun OsmMap(
         }
         // Required by OpenStreetMap's licence.
         Text(
-            "© OpenStreetMap contributors © CARTO",
+            "Esri, HERE, Garmin, © OpenStreetMap contributors",
             color = Color.Black.copy(alpha = 0.75f), fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.7f)).padding(horizontal = 6.dp, vertical = 2.dp),
         )
