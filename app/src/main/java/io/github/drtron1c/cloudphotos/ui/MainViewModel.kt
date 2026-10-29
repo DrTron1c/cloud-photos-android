@@ -195,12 +195,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshOffline()
         refreshCompanion()
         loadWhatsNew()
+        // Start-up first: it brings the VPN up (if set) before anything else goes online.
+        viewModelScope.launch { startup() }
         updates.checkOnLaunch()
         if (settings.aiSearch) {
             viewModelScope.launch { smart.index() }
             SmartIndexWorker.start(getApplication(), settings)
         }
-        viewModelScope.launch { startup() }
         viewModelScope.launch {
             CustomLauncher.events.collect {
                 toast(it)
