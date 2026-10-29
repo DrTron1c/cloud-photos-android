@@ -3,9 +3,10 @@
 ## Build 24 · Memories, People & Pets, Places and big-screen mode
 - **Memories** — trips, big days, seasons, years and On This Day, made on this device, played with music (three built-in tracks or your own song). Optional morning **On This Day** reminder.
 - **People & Pets** — faces found and grouped on the device; name people, merge, hide. Search “Anna beach 2025”. Dogs and cats found by Smart Search.
-- **Text in photos** — read signs, documents and screenshots: search their words, or tap **T** in a photo to copy the text.
-- **Places** — photos grouped by town (named offline), with an optional OpenStreetMap map.
+- **Text in photos** — read signs, documents and screenshots: search their words, or long-press a photo to select its text (Live Text).
+- **Places** — photos grouped by town (named offline), with an optional map — place names in English.
 - **Similar Photos** — bursts and retakes grouped so you can keep the best and clear the rest.
+- **Full screen** — a tap hides everything, including the video bar; zooming in hides it too. Rounded icon in Recents.
 - **Zoom** — zoom much further into photos and videos; photos load full-resolution detail as you zoom, and videos zoom at their own resolution.
 - **Shared Albums** — add photos (from your library or this device), like and comment, using the same requests as icloud.com. New — tell me if anything misbehaves.
 - **Videos** — picture-in-picture, playback speed, save a frame, trim to a new clip.

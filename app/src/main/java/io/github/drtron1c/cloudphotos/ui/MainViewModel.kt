@@ -1348,19 +1348,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         toast("Text from photos deleted from this device")
     }
 
-    /** Live Text: the words in this photo (read now if it hasn't been yet). On the device only. */
-    fun readText(asset: Asset, onResult: (List<String>) -> Unit) {
+    /** Text-with-positions already read this session (Live Text). */
+    private val textLayouts = HashMap<String, io.github.drtron1c.cloudphotos.ai.TextLayout>()
+
+    /**
+     * Live Text: the words in this photo and where they are, read on the device (the text reader
+     * is downloaded once if needed). [quiet] = don't download or complain (long-press on a Live Photo).
+     */
+    fun readText(asset: Asset, quiet: Boolean = false, onResult: (io.github.drtron1c.cloudphotos.ai.TextLayout?) -> Unit) {
+        textLayouts[asset.id]?.let { onResult(it); return }
         viewModelScope.launch {
             vision.load()
-            vision.textOf(asset.id)?.let { onResult(it); return@launch }
             if (!vision.textPack.present()) {
-                if (offlineMode) { toast("The text reader isn't downloaded yet"); return@launch }
+                if (quiet || offlineMode) { if (!quiet) toast("The text reader isn't downloaded yet"); onResult(null); return@launch }
                 busy = "Getting the text reader (${megabytes(vision.textPack.downloadSize)}, once)…"
                 val ok = vision.textPack.download(http)
                 busy = null
-                if (!ok) { toast("Couldn't download the text reader"); return@launch }
+                if (!ok) { toast("Couldn't download the text reader"); onResult(null); return@launch }
             }
-            busy = "Reading text…"
+            if (!quiet) busy = "Reading text…"
             try {
                 val v = asset.edited ?: asset.medium ?: asset.thumbnail
                 val bytes = withContext(Dispatchers.IO) {
@@ -1370,20 +1376,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             ?: http.newCall(okhttp3.Request.Builder().url(ver.url).build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
                     }
                 }
-                val lines = bytes?.let { b -> withContext(Dispatchers.Default) { vision.readNow(asset.id, b) } }
+                val layout = bytes?.let { b -> withContext(Dispatchers.Default) { vision.readLayout(asset.id, b) } }
                 busy = null
-                if (lines == null) toast("Couldn't read this photo") else {
-                    onResult(lines)
-                    if (settings.aiText) vision.save()
-                }
+                if (layout == null) { if (!quiet) toast("Couldn't read this photo"); onResult(null); return@launch }
+                textLayouts[asset.id] = layout
+                if (settings.aiText) vision.save()
+                onResult(layout)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
                 busy = null
-                toast("Couldn't read the text: ${e.message ?: e.javaClass.simpleName}")
+                if (!quiet) toast("Couldn't read the text: ${e.message ?: e.javaClass.simpleName}")
+                onResult(null)
             }
         }
     }
+
+    /** Whether the text reader is on the device (long-press can select text straight away). */
+    val textReaderReady get() = vision.textPack.present()
 
     // Places
 
@@ -1414,6 +1424,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .map { io.github.drtron1c.cloudphotos.places.MapPoint(it.id, it.lat!!, it.lon!!) }
 
     fun placeLabel(lat: Double, lon: Double): String? = runCatching { geo.label(lat, lon) }.getOrNull()
+    fun geoOrNull(): io.github.drtron1c.cloudphotos.places.Geo? = runCatching { geo }.getOrNull()
 
     // Similar photos
 

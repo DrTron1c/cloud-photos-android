@@ -17,7 +17,7 @@ class GeoTest {
         assertEquals("Greece", geo.nearest(37.9755, 23.7348)?.country)
         assertEquals("London", geo.nearest(51.5007, -0.1246)?.name)
         assertEquals("Paris", geo.nearest(48.8584, 2.2945)?.name)              // Eiffel Tower
-        assertEquals("Thessaloníki", geo.nearest(40.6264, 22.9484)?.name)
+        assertEquals("Thessaloniki", geo.nearest(40.6264, 22.9484)?.name)
     }
 
     @Test

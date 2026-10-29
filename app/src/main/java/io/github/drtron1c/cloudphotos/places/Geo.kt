@@ -26,7 +26,8 @@ class Geo(citiesTsv: () -> InputStream, countriesTsv: () -> InputStream) {
             lines.mapNotNull { l -> l.split('\t').takeIf { it.size >= 2 }?.let { it[0] to it[1] } }.toMap()
         }
         val rows = citiesTsv().bufferedReader().useLines { lines -> lines.mapNotNull { l -> l.split('\t').takeIf { it.size >= 4 } }.toList() }
-        names = Array(rows.size) { rows[it][0] }
+        // English spelling without accents ("Thessaloniki", "Sao Paulo").
+        names = Array(rows.size) { english(rows[it][0]) }
         countryOf = Array(rows.size) { countries[rows[it][1]] ?: rows[it][1] }
         lats = DoubleArray(rows.size) { rows[it][2].toDouble() }
         lons = DoubleArray(rows.size) { rows[it][3].toDouble() }
@@ -34,6 +35,34 @@ class Geo(citiesTsv: () -> InputStream, countriesTsv: () -> InputStream) {
         val cells = HashMap<Int, MutableList<Int>>()
         for (i in rows.indices) cells.getOrPut(cell(lats[i], lons[i])) { ArrayList() } += i
         for ((k, v) in cells) grid[k] = v.toIntArray()
+    }
+
+    private fun english(name: String): String =
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+
+    /** A map label. */
+    class Label(val name: String, val lat: Double, val lon: Double, val country: Boolean)
+
+    /** Countries, placed among their biggest towns (for the map). */
+    val countries: List<Label> by lazy {
+        val byCountry = HashMap<String, MutableList<Int>>()
+        for (i in names.indices) { val l = byCountry.getOrPut(countryOf[i]) { ArrayList() }; if (l.size < 5) l += i }
+        byCountry.map { (name, idx) -> Label(name, idx.map { lats[it] }.average(), idx.map { lons[it] }.average(), true) }
+    }
+
+    /** Towns inside the box with at least [minPop] people, biggest first. */
+    fun towns(latMin: Double, latMax: Double, lonMin: Double, lonMax: Double, minPop: Int, limit: Int): List<Label> {
+        val out = ArrayList<Label>()
+        for (i in names.indices) {
+            if (pops[i] < minPop) break
+            val lo = lons[i]
+            val inLon = if (lonMin <= lonMax) lo in lonMin..lonMax else lo >= lonMin || lo <= lonMax
+            if (lats[i] in latMin..latMax && inLon) {
+                out += Label(names[i], lats[i], lons[i], false)
+                if (out.size >= limit) break
+            }
+        }
+        return out
     }
 
     private fun cell(lat: Double, lon: Double) = (floor(lat).toInt() + 90) * 400 + (floor(lon).toInt() + 180)

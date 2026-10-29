@@ -439,6 +439,7 @@ fun PlacesScreen(vm: MainViewModel, onBack: () -> Unit) {
             val points = remember(vm.index.entries) { vm.mapPoints() }
             OsmMap(
                 points = points,
+                geo = vm.geoOrNull(),
                 imageLoader = vm.imageLoader,
                 thumbnail = { id ->
                     val a = vm.assetFor(id)
@@ -458,8 +459,8 @@ fun PlacesScreen(vm: MainViewModel, onBack: () -> Unit) {
                 item {
                     InfoCard(
                         Icons.Outlined.Map, "Show a map?",
-                        "Places below are named on this device (no server needed). A map needs map pictures from OpenStreetMap: " +
-                            "their servers see which map areas you look at — never your photos.",
+                        "Places below are named on this device (no server needed). A map needs map pictures (OpenStreetMap data, served by CARTO): " +
+                            "their servers see which map areas you look at — never your photos. Place names on the map are in English.",
                         "Show Map",
                     ) { s.placesMap = true; showMap = true }
                 }
@@ -485,7 +486,7 @@ fun PlacesScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
             item {
                 Text(
-                    "Place names: GeoNames (CC BY 4.0). Map: © OpenStreetMap contributors.",
+                    "Place names: GeoNames (CC BY 4.0). Map: © OpenStreetMap contributors © CARTO.",
                     color = p.secondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(18.dp),
                 )
             }

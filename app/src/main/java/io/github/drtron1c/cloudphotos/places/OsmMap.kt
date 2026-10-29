@@ -66,13 +66,15 @@ object Mercator {
 }
 
 /**
- * A small OpenStreetMap map drawn by the app itself, so the map pictures load through the same
- * encrypted-DNS (and VPN) connection as everything else. OpenStreetMap's servers see which map
- * squares are shown — never your photos. Pinch to zoom, drag to move, tap a bubble to open it.
+ * A small map drawn by the app itself (OpenStreetMap data, CARTO's label-free map pictures, place
+ * names in English from the app's own town list). Map pictures load through the same
+ * encrypted-DNS (and VPN) connection as everything else; CARTO's servers see which map squares
+ * are shown — never your photos. Pinch to zoom, drag to move, tap a bubble to open it.
  */
 @Composable
 fun OsmMap(
     points: List<MapPoint>,
+    geo: Geo?,
     imageLoader: ImageLoader,
     thumbnail: @Composable (String) -> Any?,
     onOpen: (List<String>) -> Unit,
@@ -133,7 +135,8 @@ fun OsmMap(
             val sizeDp = with(density) { tileOnScreen.toDp() }
             for (ty in y0..y1) for (tx in x0..x1) {
                 val wx = Math.floorMod(tx, n)
-                val url = "https://tile.openstreetmap.org/$tz/$wx/$ty.png"
+                // Map pictures without writing on them; the place names are drawn by the app, in English.
+                val url = "https://${"abcd"[Math.floorMod(wx + ty, 4)]}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/$tz/$wx/$ty@2x.png"
                 val ox = (tx * tileOnScreen - left).roundToInt()
                 val oy = (ty * tileOnScreen - top).roundToInt()
                 AsyncImage(
@@ -147,6 +150,46 @@ fun OsmMap(
                     contentScale = ContentScale.FillBounds,
                     modifier = Modifier.offset { IntOffset(ox, oy) }.size(sizeDp + 1.dp),
                 )
+            }
+
+            // English place names: countries when zoomed out, then bigger towns first.
+            if (geo != null) {
+                val labels = remember(geo, zoom.toInt(), (cx * 64).toInt(), (cy * 64).toInt(), w, h) {
+                    val latTop = Mercator.lat((top / world).coerceIn(0.0, 1.0))
+                    val latBottom = Mercator.lat(((top + h) / world).coerceIn(0.0, 1.0))
+                    val lonLeft = Mercator.lon(((left / world) % 1.0 + 1.0) % 1.0)
+                    val lonRight = Mercator.lon((((left + w) / world) % 1.0 + 1.0) % 1.0)
+                    val minPop = when {
+                        zoom < 3.5f -> 5_000_000; zoom < 4.5f -> 2_000_000; zoom < 5.5f -> 800_000
+                        zoom < 6.5f -> 250_000; zoom < 7.5f -> 100_000; zoom < 8.5f -> 40_000; else -> 15_000
+                    }
+                    val countries = if (zoom < 6f) geo.countries.filter { it.lat in latBottom..latTop } else emptyList()
+                    countries + geo.towns(latBottom, latTop, lonLeft, lonRight, minPop, 80)
+                }
+                val taken = HashSet<Pair<Int, Int>>()
+                val cellW = with(density) { 110.dp.toPx() }
+                val cellH = with(density) { 26.dp.toPx() }
+                for (l in labels) {
+                    var sx = Mercator.x(l.lon) * world - left
+                    if (sx < 0) sx += world
+                    if (sx > w) sx -= world
+                    val sy = Mercator.y(l.lat) * world - top
+                    if (sx < 0 || sy < 0 || sx > w || sy > h) continue
+                    val key = (sx / cellW).toInt() to (sy / cellH).toInt()
+                    if (!taken.add(key)) continue
+                    Text(
+                        if (l.country) l.name.uppercase() else l.name,
+                        color = if (l.country) Color(0xFF5A5A66) else Color(0xFF26262C),
+                        fontSize = if (l.country) 11.sp else 12.sp,
+                        fontWeight = if (l.country) FontWeight.SemiBold else FontWeight.Medium,
+                        letterSpacing = if (l.country) 1.sp else 0.sp,
+                        style = androidx.compose.ui.text.TextStyle(
+                            shadow = androidx.compose.ui.graphics.Shadow(Color.White, blurRadius = 6f),
+                        ),
+                        maxLines = 1,
+                        modifier = Modifier.offset { IntOffset(sx.roundToInt() - 20, sy.roundToInt() - 8) },
+                    )
+                }
             }
 
             // Photos grouped into bubbles ~70 dp apart.
@@ -198,7 +241,7 @@ fun OsmMap(
         }
         // Required by OpenStreetMap's licence.
         Text(
-            "© OpenStreetMap contributors",
+            "© OpenStreetMap contributors © CARTO",
             color = Color.Black.copy(alpha = 0.75f), fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomEnd).background(Color.White.copy(alpha = 0.7f)).padding(horizontal = 6.dp, vertical = 2.dp),
         )

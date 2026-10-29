@@ -24,6 +24,10 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/** Text found in a photo: each line with its box as fractions of the picture. */
+class TextLayout(val aspect: Float, val lines: List<TextBox>)
+class TextBox(val text: String, val x: Float, val y: Float, val w: Float, val h: Float)
+
 /** A face found in a photo: box as fractions of the picture (x, y, w, h) and its fingerprint. */
 class FaceRecord(val box: FloatArray, val score: Float, val emb: Packed)
 
@@ -241,16 +245,22 @@ class Vision(context: Context) {
     }
 
     /** Text of one photo read right now (the viewer's "Text in Photo"), and remembered. */
-    fun readNow(id: String, jpeg: ByteArray): List<String>? {
+    fun readNow(id: String, jpeg: ByteArray): List<String>? = readLayout(id, jpeg)?.lines?.map { it.text }
+
+    /** Text of one photo with where each line is (for selecting it on the photo, like Live Text). */
+    fun readLayout(id: String, jpeg: ByteArray): TextLayout? {
         val bmp = decode(jpeg, 2400) ?: return null
         val w = bmp.width
         val h = bmp.height
         val px = IntArray(w * h)
         bmp.getPixels(px, 0, w, 0, 0, w, h)
         bmp.recycle()
-        val lines = textModel().read(px, w, h, maxSide = 1280).map { it.text }
-        texts?.let { synchronized(it) { it[id] = lines.joinToString("\n") } }
-        return lines
+        val lines = textModel().read(px, w, h, maxSide = 1280)
+        texts?.let { synchronized(it) { it[id] = lines.joinToString("\n") { l -> l.text } } }
+        return TextLayout(
+            w.toFloat() / h,
+            lines.map { TextBox(it.text, it.x.toFloat() / w, it.y.toFloat() / h, it.w.toFloat() / w, it.h.toFloat() / h) },
+        )
     }
 
     fun textOf(id: String): List<String>? = texts?.get(id)?.let { s -> if (s.isEmpty()) emptyList() else s.split('\n') }

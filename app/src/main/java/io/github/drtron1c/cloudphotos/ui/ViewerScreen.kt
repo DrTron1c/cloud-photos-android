@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -182,7 +183,9 @@ fun ViewerScreen(
     var menu by remember { mutableStateOf(false) }
     var addToAlbum by remember { mutableStateOf<Asset?>(null) }
     var liveTrigger by remember { mutableIntStateOf(0) }
-    var textSheet by remember { mutableStateOf<List<String>?>(null) }
+    // Live Text: the photo's text laid over it, selectable (long-press, T or the Text button).
+    var liveText by remember { mutableStateOf<Pair<String, io.github.drtron1c.cloudphotos.ai.TextLayout>?>(null) }
+    var resetZoom by remember { mutableIntStateOf(0) }
     // Shared Albums: likes and comments.
     val sharedAlbum = remember(list.key) { vm.sharedAlbumOf(list) }
     var commentsOpen by remember { mutableStateOf(false) }
@@ -217,15 +220,27 @@ fun ViewerScreen(
     }
     DisposableEffect(inSplit) { onDispose { if (inSplit) vm.viewingId = null } }
 
-    fun readText(a: Asset) {
-        vm.readText(a) { lines -> textSheet = lines }
+    fun readText(a: Asset, fromLongPress: Boolean = false) {
+        // A long-press on a Live Photo plays it unless there's text to select.
+        val quiet = fromLongPress && a.isLive && !vm.textReaderReady
+        vm.readText(a, quiet = quiet) { layout ->
+            when {
+                layout != null && layout.lines.isNotEmpty() -> {
+                    resetZoom++
+                    chrome = false
+                    liveText = a.id to layout
+                }
+                fromLongPress && a.isLive -> liveTrigger++
+                layout != null -> vm.toast("No text found in this photo")
+            }
+        }
     }
 
     KeyShortcuts(vm, level, enabled = !covered && !vm.inPip) { e ->
         val a = list[pager.currentPage]
         val code = e.keyCode
         when {
-            code == KeyEvent.KEYCODE_ESCAPE -> { onClose(); true }
+            code == KeyEvent.KEYCODE_ESCAPE -> { if (liveText != null) liveText = null else onClose(); true }
             code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_PAGE_DOWN -> {
                 if (pager.currentPage < count - 1) scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }; true
             }
@@ -315,12 +330,14 @@ fun ViewerScreen(
                         vm = vm,
                         asset = asset,
                         liveTrigger = if (pager.currentPage == page) liveTrigger else 0,
+                        resetZoom = if (pager.currentPage == page) resetZoom else 0,
                         onTap = { chrome = !chrome },
                         onZoomIn = { chrome = false },
                         onLongPress = {
-                            // Side by side with another app: long-press drags the photo into it.
+                            // Side by side with another app: long-press drags the photo into it;
+                            // otherwise it selects the text in the photo (or plays a Live Photo).
                             if (vm.canDragOut(context)) vm.startDragOut(view, asset)
-                            else if (asset.isLive) liveTrigger++
+                            else readText(asset, fromLongPress = true)
                         },
                     )
                 }
@@ -328,6 +345,11 @@ fun ViewerScreen(
         }
 
         val current = list[pager.currentPage]
+
+        val shownText = liveText?.takeIf { it.first == current?.id }?.second
+        if (shownText != null) {
+            LiveTextOverlay(vm, shownText, statusTop) { liveText = null }
+        }
 
         // Top bar
         AnimatedVisibility(
@@ -554,10 +576,61 @@ fun ViewerScreen(
             CommentsSheet(vm, sharedAlbum, current, comments.orEmpty()) { vm.loadComments(sharedAlbum, current) { comments = it } }
         }
     }
-    textSheet?.let { lines ->
-        ModalBottomSheet(onDismissRequest = { textSheet = null }, containerColor = p.card) {
-            TextInPhotoSheet(vm, lines)
+}
+
+/** Live Text: each line of the photo's text in place over it — drag to select, or Copy All. */
+@Composable
+private fun LiveTextOverlay(vm: MainViewModel, layout: io.github.drtron1c.cloudphotos.ai.TextLayout, top: Dp, onClose: () -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    BoxWithConstraints(
+        Modifier.fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.3f))
+            .pointerInput(Unit) { detectTapGestures(onTap = { onClose() }) },
+    ) {
+        val bw = constraints.maxWidth.toFloat()
+        val bh = constraints.maxHeight.toFloat()
+        val fitW = min(bw, bh * layout.aspect)
+        val fitH = fitW / layout.aspect
+        val ox = (bw - fitW) / 2
+        val oy = (bh - fitH) / 2
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Box(Modifier.fillMaxSize()) {
+                for (l in layout.lines) {
+                    val x = ox + l.x * fitW
+                    val y = oy + l.y * fitH
+                    val w = (l.w * fitW).coerceAtLeast(8f)
+                    val h = (l.h * fitH).coerceAtLeast(8f)
+                    Box(
+                        Modifier
+                            .offset { androidx.compose.ui.unit.IntOffset(x.roundToInt(), y.roundToInt()) }
+                            .size(with(density) { w.toDp() }, with(density) { h.toDp() })
+                            .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(4.dp)),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            l.text, color = Color.Black,
+                            fontSize = with(density) { (h * 0.62f).toSp() },
+                            maxLines = 1, softWrap = false,
+                            modifier = Modifier.padding(horizontal = 2.dp),
+                        )
+                    }
+                }
+            }
         }
+        Row(Modifier.align(Alignment.TopEnd).padding(top = top + 12.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill(text = "Copy All", onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(layout.lines.joinToString("\n") { it.text }))
+                vm.toast("Text copied")
+            })
+            Pill(text = "Done", onClick = onClose)
+        }
+        Text(
+            "Long-press a word, then drag to select",
+            color = Color.White, fontSize = 13.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
 }
 
@@ -635,7 +708,15 @@ private fun TextInPhotoSheet(vm: MainViewModel, lines: List<String>) {
 }
 
 @Composable
-private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: () -> Unit, onZoomIn: () -> Unit, onLongPress: () -> Unit) {
+private fun PhotoPage(
+    vm: MainViewModel,
+    asset: Asset,
+    liveTrigger: Int,
+    resetZoom: Int,
+    onTap: () -> Unit,
+    onZoomIn: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     val context = LocalContext.current
     val image = asset.displayImage
     Box(Modifier.fillMaxSize()) {
@@ -659,6 +740,8 @@ private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: 
         val zoomable = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
         val zoom = rememberZoomableImageState(zoomable)
         HideBarsWhenZoomed(zoomable, onZoomIn)
+        // Live Text lines up with the photo as it fits the screen.
+        LaunchedEffect(resetZoom) { if (resetZoom > 0) runCatching { zoomable.resetZoom() } }
         ZoomableAsyncImage(
             model = request,
             contentDescription = asset.filename,

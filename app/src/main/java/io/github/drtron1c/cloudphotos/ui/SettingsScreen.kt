@@ -294,7 +294,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             // ---------- Places ----------
             Group("Places") {
-                ToggleRow("Show map", "Map pictures come from OpenStreetMap — their servers see which map areas you look at, never your photos", s.placesMap) { s.placesMap = it }
+                ToggleRow("Show map", "Map pictures (OpenStreetMap data) come from CARTO — their servers see which map areas you look at, never your photos", s.placesMap) { s.placesMap = it }
             }
             Footer("Place names (“Athens, Greece”) are worked out on this device from a built-in list of towns (GeoNames, CC BY 4.0).")
 

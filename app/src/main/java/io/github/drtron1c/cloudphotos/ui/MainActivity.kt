@@ -145,10 +145,22 @@ class MainActivity : FragmentActivity(), PipHost {
         if (name.isEmpty()) return
         val icon = CustomLauncher.savedIcon(this)?.let {
             val inset = (IconArt.SIZE - IconArt.VISIBLE) / 2
-            Bitmap.createBitmap(it, inset, inset, IconArt.VISIBLE, IconArt.VISIBLE)
+            rounded(Bitmap.createBitmap(it, inset, inset, IconArt.VISIBLE, IconArt.VISIBLE))
         }
         @Suppress("DEPRECATION")
         setTaskDescription(ActivityManager.TaskDescription(name, icon))
+    }
+
+    /** App-icon shape (rounded corners, like every other icon in Recents). */
+    private fun rounded(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+            shader = android.graphics.BitmapShader(src, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+        }
+        val r = src.width * 0.225f
+        c.drawRoundRect(0f, 0f, src.width.toFloat(), src.height.toFloat(), r, r, paint)
+        return out
     }
 
     /** Keep photos out of the app-switcher thumbnail. */
