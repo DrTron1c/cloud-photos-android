@@ -21,6 +21,7 @@ class AuthState(private val store: SecureFile) {
     @Volatile var fullName: String? = null
     @Volatile var ckDatabaseUrl: String? = null
     @Volatile var photosUploadUrl: String? = null
+    @Volatile var sharedStreamsUrl: String? = null
     @Volatile var savedPassword: String? = null
 
     init {
@@ -44,6 +45,7 @@ class AuthState(private val store: SecureFile) {
             fullName = o.optNullable("fullName")
             ckDatabaseUrl = o.optNullable("ckDatabaseUrl")
             photosUploadUrl = o.optNullable("photosUploadUrl")
+            sharedStreamsUrl = o.optNullable("sharedStreamsUrl")
             savedPassword = o.optNullable("savedPassword")
         } catch (_: Exception) {
         }
@@ -64,6 +66,7 @@ class AuthState(private val store: SecureFile) {
         o.putOpt("fullName", fullName)
         o.putOpt("ckDatabaseUrl", ckDatabaseUrl)
         o.putOpt("photosUploadUrl", photosUploadUrl)
+        o.putOpt("sharedStreamsUrl", sharedStreamsUrl)
         o.putOpt("savedPassword", savedPassword)
         store.write(o.toString())
     }
@@ -78,6 +81,7 @@ class AuthState(private val store: SecureFile) {
         dsid = null
         ckDatabaseUrl = null
         photosUploadUrl = null
+        sharedStreamsUrl = null
         if (!keepTrust) {
             trustToken = null
             savedPassword = null

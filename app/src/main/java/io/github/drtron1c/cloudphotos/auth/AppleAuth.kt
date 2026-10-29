@@ -303,6 +303,7 @@ class AppleAuth(
         val ws = j.optJSONObject("webservices")
         ws?.optJSONObject("ckdatabasews")?.optString("url")?.takeIf { it.isNotEmpty() }?.let { state.ckDatabaseUrl = it }
         ws?.optJSONObject("photosupload")?.optString("url")?.takeIf { it.isNotEmpty() }?.let { state.photosUploadUrl = it }
+        ws?.optJSONObject("sharedstreams")?.optString("url")?.takeIf { it.isNotEmpty() }?.let { state.sharedStreamsUrl = it }
         state.save()
     }
 

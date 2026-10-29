@@ -1,7 +1,14 @@
 package io.github.drtron1c.cloudphotos.ui
 
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,22 +19,33 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,20 +53,46 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import io.github.drtron1c.cloudphotos.BuildConfig
+import io.github.drtron1c.cloudphotos.settings.AppIdentity
+import io.github.drtron1c.cloudphotos.settings.AppSettings
+import io.github.drtron1c.cloudphotos.work.AutoUploadWorker
+import io.github.drtron1c.cloudphotos.work.OfflineWorker
+import kotlinx.coroutines.delay
+
+val DNS_OPTIONS = listOf(
+    "cloudflare" to "Cloudflare (1.1.1.1)",
+    "quad9" to "Quad9 (9.9.9.9)",
+    "google" to "Google (8.8.8.8)",
+    "system" to "Network default (not encrypted)",
+)
 
 @Composable
 fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val p = LocalPalette.current
-    val activity = LocalContext.current.findActivity() as? FragmentActivity
+    val s = vm.settings
+    val context = LocalContext.current
+    val activity = context.findActivity() as? FragmentActivity
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var confirmSignOut by remember { mutableStateOf(false) }
+    var dialog by remember { mutableStateOf<String?>(null) }
+    // Refreshed every couple of seconds so background job status stays current.
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(2000); tick++ } }
+    var offlineBytes by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(tick, vm.offlineAlbums) { offlineBytes = vm.offlineBytes() }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (AutoUploadWorker.hasMediaAccess(context)) dialog = "autoupload"
+        else vm.toast("Cloud Photos needs access to your photos and videos to upload them")
+    }
 
     Column(
         Modifier
@@ -65,6 +109,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = p.label)
             }
 
+            // ---------- Account ----------
             Group("Account") {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     AppIcon(44.dp)
@@ -72,12 +117,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     Column {
                         Text(vm.fullName ?: "iCloud", color = p.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                         Text(vm.appleId, color = p.secondaryLabel, fontSize = 14.sp)
+                        if (vm.offlineMode) Text("Offline — showing photos saved on this device", color = p.secondaryLabel, fontSize = 13.sp)
                     }
                 }
             }
 
             if (vm.zones.size > 1) {
-                Group("Library", footer = "Choose which iCloud library to browse.") {
+                Group("Library", footer = "Choose which iCloud library to browse, like the Personal / Shared Library switch on iPhone.") {
                     vm.zones.forEachIndexed { i, z ->
                         if (i > 0) Divider()
                         Row(
@@ -91,20 +137,210 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
 
-            Group("Privacy", footer = "Uses your fingerprint, face unlock or screen-lock PIN.") {
-                ToggleRow("Lock Cloud Photos", "Ask to unlock every time you open the app", vm.lockApp) { on ->
+            // ---------- Appearance ----------
+            Group("Appearance") {
+                Segmented("Theme", listOf("system" to "Automatic", "light" to "Light", "dark" to "Dark"), s.themeMode) { s.themeMode = it }
+                Divider()
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("Accent colour", color = p.label, fontSize = 17.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AppSettings.ACCENTS.forEachIndexed { i, (name, argb) ->
+                            val c = Color(argb)
+                            Box(
+                                Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(c)
+                                    .border(if (s.accent == i) 3.dp else 0.dp, if (s.accent == i) p.label else Color.Transparent, CircleShape)
+                                    .clickable { s.accent = i },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (s.accent == i) Icon(Icons.Filled.Check, name, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+                Divider()
+                ToggleRow("Tab bar labels", "Show names under the Library, Albums and Search icons", s.tabLabels) { s.tabLabels = it }
+                Divider()
+                ValueRow("App name", AppSettings.LAUNCHER_NAMES.firstOrNull { it.first == s.launcherName }?.second ?: "Cloud Photos") { dialog = "name" }
+                Divider()
+                ActionRow("Add home-screen shortcut with any name…", p.accent) { dialog = "shortcut" }
+            }
+            Footer("Android only lets an app pick its home-screen name from names built into it, so choose one above — or add a shortcut with any name and colour you like.")
+
+            // ---------- Library & grid ----------
+            Group("Library") {
+                ToggleRow("Newest at top", "Off = newest at the bottom, like iPhone", s.newestOnTop) { vm.setNewestOnTop(it) }
+                Divider()
+                ToggleRow("Aspect ratio grid", "Show whole photos instead of square crops", s.aspectGrid) { s.aspectGrid = it }
+                Divider()
+                ToggleRow("Video lengths", "Show the duration on video thumbnails", s.showDurations) { s.showDurations = it }
+                Divider()
+                ToggleRow("Favourite hearts", "Mark favourites in the grid", s.showFavouriteBadges) { s.showFavouriteBadges = it }
+                Divider()
+                Segmented("Open app on", listOf("library" to "Library", "albums" to "Albums", "search" to "Search"), s.startTab) { s.startTab = it }
+                Divider()
+                Segmented("Library view", listOf("years" to "Years", "months" to "Months", "days" to "Days", "all" to "All"), s.libraryView) { s.libraryView = it }
+                Divider()
+                ToggleRow("Confirm before deleting", "Ask before moving items to Recently Deleted", s.confirmDelete) { s.confirmDelete = it }
+                Divider()
+                ToggleRow("Haptic feedback", "Little taps when selecting and zooming the grid", s.haptics) { s.haptics = it }
+            }
+
+            // ---------- Videos ----------
+            Group("Videos & Live Photos") {
+                ToggleRow("Auto-play videos", "Start playing when you open a video", s.autoplayVideos) { s.autoplayVideos = it }
+                Divider()
+                ToggleRow("Loop videos", "Play again from the start when they finish", s.loopVideos) { s.loopVideos = it }
+                Divider()
+                ToggleRow("Start muted", "Turn sound on with the speaker button", s.startMuted) { s.startMuted = it }
+                Divider()
+                ToggleRow("Auto-play Live Photos", "Play the motion once when you swipe to one", s.livePhotoAutoplay) { s.livePhotoAutoplay = it }
+            }
+
+            // ---------- Slideshow ----------
+            Group("Slideshow") {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Time per photo", color = p.label, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                        Text("${s.slideshowSeconds} s", color = p.secondaryLabel, fontSize = 15.sp)
+                    }
+                    Slider(
+                        value = s.slideshowSeconds.toFloat(),
+                        onValueChange = { s.slideshowSeconds = it.toInt().coerceIn(2, 15) },
+                        valueRange = 2f..15f,
+                        steps = 12,
+                    )
+                }
+                Divider()
+                ToggleRow("Pan & zoom", "Gentle Ken Burns movement", s.slideshowKenBurns) { s.slideshowKenBurns = it }
+                Divider()
+                ToggleRow("Shuffle", "Show photos in random order", s.slideshowShuffle) { s.slideshowShuffle = it }
+            }
+
+            // ---------- Widget ----------
+            Group("Home-screen widget") {
+                Segmented(
+                    "Widget shows",
+                    listOf("onthisday" to "On This Day", "favourites" to "Favourites", "random" to "Random"),
+                    s.widgetMode,
+                ) { vm.setWidgetMode(it) }
+            }
+            Footer("Long-press your home screen → Widgets → Cloud Photos to add it. It changes photo every few hours.")
+
+            // ---------- Auto-upload ----------
+            Group("Upload from this device") {
+                ToggleRow(
+                    "Upload new photos & videos",
+                    "Add photos taken on this device to iCloud Photos automatically",
+                    s.autoUpload,
+                    enabled = vm.canUpload || s.autoUpload,
+                ) { on ->
+                    if (!on) vm.setAutoUpload(false)
+                    else if (AutoUploadWorker.hasMediaAccess(context)) dialog = "autoupload"
+                    else {
+                        vm.expectingExternal = true
+                        permissionLauncher.launch(AutoUploadWorker.permissions())
+                    }
+                }
+                if (s.autoUpload) {
+                    Divider()
+                    ToggleRow("Wi-Fi only", "Don't use mobile data for uploads", s.autoUploadWifiOnly) { vm.setAutoUploadWifiOnly(it) }
+                    Divider()
+                    ToggleRow("Include screenshots", "Upload screenshots too", s.autoUploadScreenshots) { s.autoUploadScreenshots = it }
+                    val status = remember(tick) { vm.autoUploadStatus() }
+                    if (status.isNotBlank()) {
+                        Divider()
+                        Text(status, color = p.secondaryLabel, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+                    }
+                }
+            }
+            Footer("Photos you saved from iCloud with this app are never uploaded again.")
+
+            // ---------- Offline ----------
+            Group("Available offline") {
+                if (vm.offlineAlbums.isEmpty()) {
+                    Text(
+                        "No albums kept offline. Open an album, tap ••• and choose “Keep Offline”.",
+                        color = p.secondaryLabel, fontSize = 14.sp, modifier = Modifier.padding(16.dp),
+                    )
+                } else {
+                    vm.offlineAlbums.forEachIndexed { i, spec ->
+                        if (i > 0) Divider()
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(spec.title, color = p.label, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                            IconButton(onClick = { vm.setOffline(spec, false) }) {
+                                Icon(Icons.Outlined.Close, "Stop keeping offline", tint = p.secondaryLabel)
+                            }
+                        }
+                    }
+                }
+                Divider()
+                ToggleRow("Include videos", "Videos use a lot more space", s.offlineVideos) {
+                    s.offlineVideos = it
+                    OfflineWorker.syncNow(context)
+                }
+                Divider()
+                ValueRow("Space used", formatBytes(offlineBytes).ifEmpty { "0 KB" }, onClick = null)
+                val status = remember(tick) { vm.offlineStatus() }
+                if (status.isNotBlank()) {
+                    Divider()
+                    Text(status, color = p.secondaryLabel, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+                }
+                if (vm.offlineAlbums.isNotEmpty()) {
+                    Divider()
+                    ActionRow("Download now", p.accent) { OfflineWorker.syncNow(context); vm.toast("Downloading in the background…") }
+                    Divider()
+                    ActionRow("Remove all offline copies", p.destructive) { dialog = "clearoffline" }
+                }
+            }
+            Footer("Offline copies live in this app's private storage (other apps can't read them), open without internet, and are deleted when you sign out.")
+
+            // ---------- Privacy ----------
+            Group("Privacy & security") {
+                ValueRow("Encrypted DNS", DNS_OPTIONS.firstOrNull { it.first == s.dnsProvider }?.second ?: s.dnsProvider) { dialog = "dns" }
+                Divider()
+                ToggleRow(
+                    "Hide in Recents",
+                    if (Build.VERSION.SDK_INT >= 33) "Blank preview in the app switcher" else "Blank preview in the app switcher (also blocks screenshots)",
+                    s.hideInRecents,
+                ) { s.hideInRecents = it }
+                Divider()
+                ToggleRow("Lock Cloud Photos", "Ask for fingerprint, face or PIN every time you open the app", s.lockApp) { on ->
                     if (activity != null && on) {
+                        vm.expectingExternal = true
                         activity.requireUnlock("Turn on app lock") { vm.changeLockApp(true) }
                     } else vm.changeLockApp(on)
                 }
                 Divider()
-                ToggleRow("Lock Hidden & Recently Deleted", "Like Face ID for these albums on iPhone", vm.lockPrivateAlbums) { on ->
+                ToggleRow("Lock Hidden & Recently Deleted", "Like Face ID for these albums on iPhone", s.lockPrivateAlbums) { on ->
                     if (activity != null && !on) {
+                        vm.expectingExternal = true
                         activity.requireUnlock("Turn off album lock") { vm.changeLockPrivateAlbums(false) }
                     } else vm.changeLockPrivateAlbums(on)
                 }
+                Divider()
+                ToggleRow("Recently Viewed album", "Keep a list of what you've opened (on this device only)", s.recentlyViewedEnabled) {
+                    s.recentlyViewedEnabled = it
+                    if (!it) vm.clearRecentlyViewed()
+                }
+                if (s.recentlyViewedEnabled && vm.recentlyViewed.isNotEmpty()) {
+                    Divider()
+                    ActionRow("Clear Recently Viewed", p.accent) { vm.clearRecentlyViewed(); vm.toast("Recently Viewed cleared") }
+                }
+                Divider()
+                ActionRow("Clear cached photos", p.accent) { vm.clearImageCache() }
             }
+            Footer(
+                "Photos and videos are fetched over encrypted HTTPS straight from Apple, and DNS look-ups are encrypted too, so your Wi-Fi " +
+                    "provider can't see which photo or video you open. They can still see that this device is talking to Apple's iCloud " +
+                    "servers and how much data moves — use a VPN if you want to hide that as well. The app has no web browser inside it, " +
+                    "so nothing you view is ever saved in any browser history."
+            )
 
+            // ---------- Sign-in ----------
             Group("Sign-in") {
                 if (vm.rememberPassword) {
                     ActionRow("Forget saved password", p.accent) { vm.forgetPassword(); vm.toast("Saved password removed") }
@@ -114,8 +350,10 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         color = p.secondaryLabel, fontSize = 14.sp, modifier = Modifier.padding(16.dp),
                     )
                 }
-                Divider()
-                ActionRow("Refresh library", p.accent) { vm.refreshAll(); vm.toast("Refreshing…") }
+                if (!vm.offlineMode) {
+                    Divider()
+                    ActionRow("Refresh library", p.accent) { vm.refreshAll(); vm.toast("Refreshing…") }
+                }
             }
 
             Group(null) {
@@ -124,18 +362,52 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             Text(
                 "Cloud Photos ${BuildConfig.VERSION_NAME}\nUnofficial iCloud Photos client — not made by or affiliated with Apple. " +
-                    "It talks only to Apple's own iCloud servers, exactly like icloud.com does.",
+                    "It talks only to Apple's own iCloud servers, the same way icloud.com does.",
                 color = p.secondaryLabel, fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
         }
     }
 
+    when (dialog) {
+        "name" -> ChoiceDialog(
+            title = "App name",
+            options = AppSettings.LAUNCHER_NAMES,
+            selected = s.launcherName,
+            onDismiss = { dialog = null },
+        ) { vm.setLauncherName(it); dialog = null }
+        "dns" -> ChoiceDialog(
+            title = "Encrypted DNS",
+            options = DNS_OPTIONS,
+            selected = s.dnsProvider,
+            footer = "Looks up Apple's server addresses over HTTPS so your Wi-Fi or mobile provider can't log them. If a network blocks it, pick another provider.",
+            onDismiss = { dialog = null },
+        ) { vm.setDns(it); dialog = null }
+        "shortcut" -> ShortcutDialog(
+            canPin = AppIdentity.canPinShortcuts(context),
+            onDismiss = { dialog = null },
+        ) { name, color -> vm.pinShortcut(name, color); dialog = null }
+        "autoupload" -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Upload which photos?") },
+            text = { Text("Upload only photos and videos taken from now on, or everything already on this device too? Items already in iCloud are skipped.") },
+            confirmButton = { TextButton(onClick = { vm.setAutoUpload(true, fromNow = true); dialog = null }) { Text("From Now On") } },
+            dismissButton = { TextButton(onClick = { vm.setAutoUpload(true, fromNow = false); dialog = null }) { Text("Everything") } },
+        )
+        "clearoffline" -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Remove offline copies?") },
+            text = { Text("Photos stay in iCloud — only the copies saved on this device are removed.") },
+            confirmButton = { TextButton(onClick = { vm.clearOffline(); dialog = null }) { Text("Remove", color = p.destructive) } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+        )
+    }
+
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out?") },
-            text = { Text("This removes your iCloud session, saved password and trusted-device status from this app. Your photos stay safe in iCloud.") },
+            text = { Text("This removes your iCloud session, saved password, offline copies and trusted-device status from this app. Your photos stay safe in iCloud.") },
             confirmButton = {
                 TextButton(onClick = { confirmSignOut = false; vm.signOut() }) { Text("Sign Out", color = p.destructive) }
             },
@@ -144,8 +416,91 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     }
 }
 
+/** Pick one option from a short list. */
 @Composable
-private fun Group(title: String?, footer: String? = null, content: @Composable () -> Unit) {
+fun ChoiceDialog(
+    title: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    footer: String? = null,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    val p = LocalPalette.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                for ((key, label) in options) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onPick(key) }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = key == selected, onClick = { onPick(key) })
+                        Text(label, color = p.label, fontSize = 16.sp)
+                    }
+                }
+                if (footer != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(footer, color = p.secondaryLabel, fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun ShortcutDialog(canPin: Boolean, onDismiss: () -> Unit, onAdd: (String, Int) -> Unit) {
+    val p = LocalPalette.current
+    var name by remember { mutableStateOf("") }
+    var colour by remember { mutableIntStateOf(0) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Home-screen shortcut") },
+        text = {
+            Column {
+                if (!canPin) {
+                    Text("Your home-screen app doesn't support adding shortcuts.", color = p.secondaryLabel)
+                    return@Column
+                }
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.take(30) },
+                    label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Icon colour", color = p.secondaryLabel, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppSettings.ACCENTS.forEachIndexed { i, (label, argb) ->
+                        Box(
+                            Modifier.size(30.dp).clip(CircleShape).background(Color(argb))
+                                .border(if (colour == i) 3.dp else 0.dp, if (colour == i) p.label else Color.Transparent, CircleShape)
+                                .clickable { colour = i },
+                            contentAlignment = Alignment.Center,
+                        ) { if (colour == i) Icon(Icons.Filled.Check, label, tint = Color.White, modifier = Modifier.size(16.dp)) }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Your launcher will ask you to confirm. You can then remove the original icon from your home screen (the app stays in the app drawer).",
+                    color = p.secondaryLabel, fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canPin && name.isNotBlank(),
+                onClick = { onAdd(name.trim(), Color(AppSettings.ACCENTS[colour].second).toArgb()) },
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun Group(title: String?, content: @Composable () -> Unit) {
     val p = LocalPalette.current
     Spacer(Modifier.height(22.dp))
     if (title != null) {
@@ -161,9 +516,20 @@ private fun Group(title: String?, footer: String? = null, content: @Composable (
             .clip(RoundedCornerShape(12.dp))
             .background(p.card)
     ) { content() }
-    if (footer != null) {
-        Text(footer, color = p.secondaryLabel, fontSize = 13.sp, modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 6.dp))
-    }
+}
+
+@Composable
+private fun Group(title: String?, footer: String, content: @Composable () -> Unit) {
+    Group(title, content)
+    Footer(footer)
+}
+
+@Composable
+private fun Footer(text: String) {
+    Text(
+        text, color = LocalPalette.current.secondaryLabel, fontSize = 13.sp,
+        modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 6.dp),
+    )
 }
 
 @Composable
@@ -172,14 +538,58 @@ private fun Divider() {
 }
 
 @Composable
-private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(title: String, subtitle: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val p = LocalPalette.current
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = enabled) { onChange(!checked) }.padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = p.label, fontSize = 17.sp)
+            Text(title, color = if (enabled) p.label else p.secondaryLabel, fontSize = 17.sp)
             Text(subtitle, color = p.secondaryLabel, fontSize = 13.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+@Composable
+private fun ValueRow(title: String, value: String, onClick: (() -> Unit)?) {
+    val p = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = onClick != null) { onClick?.invoke() }.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = p.label, fontSize = 17.sp, modifier = Modifier.weight(1f))
+        Text(value, color = p.secondaryLabel, fontSize = 15.sp)
+        if (onClick != null) Text("  ›", color = p.secondaryLabel, fontSize = 18.sp)
+    }
+}
+
+@Composable
+private fun Segmented(title: String, options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
+    val p = LocalPalette.current
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(title, color = p.label, fontSize = 17.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(p.placeholder).padding(2.dp),
+        ) {
+            for ((key, label) in options) {
+                val on = key == selected
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (on) p.card else Color.Transparent)
+                        .clickable { onPick(key) }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = p.label, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                }
+            }
+        }
     }
 }
 

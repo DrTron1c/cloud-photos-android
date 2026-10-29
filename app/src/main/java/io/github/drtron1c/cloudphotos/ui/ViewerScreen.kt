@@ -1,14 +1,9 @@
 package io.github.drtron1c.cloudphotos.ui
 
-import android.view.ViewGroup
+import android.content.Intent
+import android.net.Uri
 import android.view.TextureView
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.geometry.Size
-import androidx.media3.common.VideoSize
-import me.saket.telephoto.zoomable.ZoomSpec
-import me.saket.telephoto.zoomable.ZoomableContentLocation
-import me.saket.telephoto.zoomable.rememberZoomableState
-import me.saket.telephoto.zoomable.zoomable
+import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -24,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,12 +41,15 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -62,6 +61,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -79,6 +79,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -86,6 +87,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -94,7 +96,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -103,50 +107,67 @@ import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import io.github.drtron1c.cloudphotos.photos.AlbumKind
-import io.github.drtron1c.cloudphotos.photos.AlbumSpec
 import io.github.drtron1c.cloudphotos.photos.Asset
+import io.github.drtron1c.cloudphotos.photos.MediaList
 import io.github.drtron1c.cloudphotos.photos.Version
 import kotlinx.coroutines.delay
 import me.saket.telephoto.flick.FlickToDismiss
 import me.saket.telephoto.flick.FlickToDismissState
 import me.saket.telephoto.flick.rememberFlickToDismissState
+import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import okhttp3.OkHttpClient
 
+/** Plays local (offline) files and iCloud links through the same encrypted-DNS client. */
 @OptIn(UnstableApi::class)
-private fun newPlayer(context: android.content.Context, http: OkHttpClient, url: String): ExoPlayer =
+fun newPlayer(context: android.content.Context, http: OkHttpClient, uri: Uri, loop: Boolean = false, muted: Boolean = false): ExoPlayer =
     ExoPlayer.Builder(context)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(http)))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))))
         .build()
         .apply {
-            setMediaItem(MediaItem.fromUri(url))
+            setMediaItem(MediaItem.fromUri(uri))
+            repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            volume = if (muted) 0f else 1f
             prepare()
         }
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: () -> Unit) {
+fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: Boolean = false, onClose: () -> Unit) {
     val p = LocalPalette.current
+    val s = vm.settings
     val context = LocalContext.current
-    val list = vm.list(spec)
+    val spec = list.spec
     val count = list.count.coerceAtLeast(0)
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) { count }
     var chrome by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var addToAlbum by remember { mutableStateOf<Asset?>(null) }
     var liveTrigger by remember { mutableIntStateOf(0) }
     val flick = rememberFlickToDismissState(dismissThresholdRatio = 0.12f, rotateOnDrag = false)
     val close by rememberUpdatedState(onClose)
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val online = !vm.offlineMode
+    val editable = spec.editable && online
 
     LaunchedEffect(flick.gestureState) {
         if (flick.gestureState is FlickToDismissState.GestureState.Dismissed) close()
     }
     LaunchedEffect(list.count) { if (list.count == 0) close() }
     DisposableEffect(Unit) {
-        onDispose { vm.lastViewed = spec.key to pager.currentPage }
+        onDispose { vm.lastViewed = list.key to pager.currentPage }
+    }
+    // Settled on a new item: remember it (if enabled) and give Live Photos a quick play, like iPhone.
+    LaunchedEffect(pager.settledPage, list[pager.settledPage]?.id) {
+        val a = list[pager.settledPage] ?: return@LaunchedEffect
+        if (spec.editable) vm.noteViewed(a)
+        if (a.isLive && s.livePhotoAutoplay) liveTrigger++
     }
 
     // Tap to hide bars → true full screen, like iPhone.
@@ -189,7 +210,7 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                     asset.isVideo -> VideoPage(
                         vm = vm,
                         asset = asset,
-                        active = pager.settledPage == page,
+                        active = pager.settledPage == page && !covered,
                         chrome = chrome && !dragging,
                         controlsBottom = navBottom + 56.dp,
                         onTap = { chrome = !chrome },
@@ -222,6 +243,9 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                         Text(formatDay(current?.date ?: 0), color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(formatTime(current?.date ?: 0), color = p.secondaryLabel, fontSize = 12.sp)
                     }
+                    if (current != null && !current.isVideo && editable) {
+                        TextButton(onClick = { vm.open(Route.Editor(list.key, pager.currentPage)) }) { Text("Edit", fontSize = 16.sp) }
+                    }
                     Box {
                         IconButton(onClick = { menu = true }, enabled = current != null) {
                             Icon(Icons.Outlined.MoreHoriz, "More", tint = p.accent)
@@ -229,10 +253,24 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             if (current != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Save to Device") },
-                                    leadingIcon = { Icon(Icons.Outlined.Download, null) },
-                                    onClick = { menu = false; vm.saveToDevice(listOf(current)) },
+                                    text = { Text("Slideshow") },
+                                    leadingIcon = { Icon(Icons.Outlined.Slideshow, null) },
+                                    onClick = { menu = false; vm.open(Route.Slideshow(list.key, pager.currentPage)) },
                                 )
+                                if (online) {
+                                    DropdownMenuItem(
+                                        text = { Text("Save to Device") },
+                                        leadingIcon = { Icon(Icons.Outlined.Download, null) },
+                                        onClick = { menu = false; vm.saveToDevice(listOf(current)) },
+                                    )
+                                }
+                                if (editable) {
+                                    DropdownMenuItem(
+                                        text = { Text("Add to Album") },
+                                        leadingIcon = { Icon(Icons.Outlined.Collections, null) },
+                                        onClick = { menu = false; addToAlbum = current },
+                                    )
+                                }
                                 if (current.isLive) {
                                     DropdownMenuItem(
                                         text = { Text("Play Live Photo") },
@@ -240,16 +278,12 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                                         onClick = { menu = false; liveTrigger++ },
                                     )
                                 }
-                                if (spec.kind != AlbumKind.Deleted) {
+                                if (editable && spec.kind != AlbumKind.Deleted) {
+                                    val hidden = spec.kind == AlbumKind.Hidden
                                     DropdownMenuItem(
-                                        text = { Text(if (current.isHidden || spec.kind == AlbumKind.Hidden) "Unhide" else "Hide") },
-                                        leadingIcon = {
-                                            Icon(if (spec.kind == AlbumKind.Hidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, null)
-                                        },
-                                        onClick = {
-                                            menu = false
-                                            vm.setHidden(listOf(current), spec.kind != AlbumKind.Hidden)
-                                        },
+                                        text = { Text(if (hidden) "Unhide" else "Hide") },
+                                        leadingIcon = { Icon(if (hidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, null) },
+                                        onClick = { menu = false; vm.setHidden(listOf(current), !hidden) },
                                     )
                                 }
                             }
@@ -271,6 +305,13 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                         }
                     }
                 }
+                if (!current?.caption.isNullOrBlank()) {
+                    Text(
+                        current?.caption ?: "",
+                        color = p.label, fontSize = 14.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                    )
+                }
             }
         }
 
@@ -290,26 +331,40 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val enabled = current != null
-                if (spec.kind == AlbumKind.Deleted) {
-                    TextButton(onClick = { current?.let { vm.recover(listOf(it)) } }, enabled = enabled) {
-                        Text("Recover", fontSize = 17.sp)
+                when {
+                    !online -> {
+                        IconButton(onClick = { showInfo = true }, enabled = enabled) {
+                            Icon(Icons.Outlined.Info, "Info", tint = p.accent)
+                        }
                     }
-                    IconButton(onClick = { showInfo = true }, enabled = enabled) {
-                        Icon(Icons.Outlined.Info, "Info", tint = p.accent)
+                    spec.kind == AlbumKind.Deleted -> {
+                        TextButton(onClick = { current?.let { vm.recover(listOf(it)) } }, enabled = enabled) {
+                            Text("Recover", fontSize = 17.sp)
+                        }
+                        IconButton(onClick = { showInfo = true }, enabled = enabled) {
+                            Icon(Icons.Outlined.Info, "Info", tint = p.accent)
+                        }
                     }
-                } else {
-                    IconButton(onClick = { current?.let { a -> vm.share(listOf(a)) { context.startActivity(it) } } }, enabled = enabled) {
-                        Icon(Icons.Outlined.Share, "Share", tint = p.accent)
-                    }
-                    IconButton(onClick = { current?.let { vm.toggleFavorite(it) } }, enabled = enabled) {
-                        if (current?.isFavorite == true) Icon(Icons.Filled.Favorite, "Unfavourite", tint = p.accent)
-                        else Icon(Icons.Outlined.FavoriteBorder, "Favourite", tint = p.accent)
-                    }
-                    IconButton(onClick = { showInfo = true }, enabled = enabled) {
-                        Icon(Icons.Outlined.Info, "Info", tint = p.accent)
-                    }
-                    IconButton(onClick = { confirmDelete = true }, enabled = enabled) {
-                        Icon(Icons.Outlined.Delete, "Delete", tint = p.accent)
+                    else -> {
+                        IconButton(onClick = { current?.let { a -> vm.share(listOf(a)) { context.startActivity(it) } } }, enabled = enabled) {
+                            Icon(Icons.Outlined.Share, "Share", tint = p.accent)
+                        }
+                        if (editable) {
+                            IconButton(onClick = { current?.let { vm.toggleFavorite(it) } }, enabled = enabled) {
+                                if (current?.isFavorite == true) Icon(Icons.Filled.Favorite, "Unfavourite", tint = p.accent)
+                                else Icon(Icons.Outlined.FavoriteBorder, "Favourite", tint = p.accent)
+                            }
+                        }
+                        IconButton(onClick = { showInfo = true }, enabled = enabled) {
+                            Icon(Icons.Outlined.Info, "Info", tint = p.accent)
+                        }
+                        if (editable) {
+                            IconButton(onClick = {
+                                if (s.confirmDelete) confirmDelete = true else current?.let { vm.delete(listOf(it)) }
+                            }, enabled = enabled) {
+                                Icon(Icons.Outlined.Delete, "Delete", tint = p.accent)
+                            }
+                        }
                     }
                 }
             }
@@ -319,7 +374,7 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
     val current = list[pager.currentPage]
     if (showInfo && current != null) {
         ModalBottomSheet(onDismissRequest = { showInfo = false }, containerColor = p.card) {
-            InfoSheet(current)
+            InfoSheet(vm, current, editable)
         }
     }
     if (confirmDelete && current != null) {
@@ -334,6 +389,9 @@ fun ViewerScreen(vm: MainViewModel, spec: AlbumSpec, startIndex: Int, onClose: (
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
+    }
+    addToAlbum?.let { a ->
+        AddToAlbumDialog(vm, listOf(a), onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null })
     }
 }
 
@@ -352,7 +410,7 @@ private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: 
         }
         val request = remember(image.checksum) {
             ImageRequest.Builder(context)
-                .data(image.url)
+                .data(vm.model(image))
                 .memoryCacheKey(image.checksum)
                 .diskCacheKey(image.checksum)
                 .placeholderMemoryCacheKey(asset.thumbnail?.checksum)
@@ -380,11 +438,13 @@ private fun LivePlayback(vm: MainViewModel, motion: Version, trigger: Int) {
     val context = LocalContext.current
     var playing by remember(trigger) { mutableStateOf(true) }
     if (!playing) return
-    val player = remember(trigger) { newPlayer(context, vm.http, motion.url).apply { playWhenReady = true } }
+    val player = remember(trigger) {
+        newPlayer(context, vm.http, vm.mediaUri(motion), muted = vm.settings.startMuted).apply { playWhenReady = true }
+    }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) playing = false
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) playing = false
             }
         }
         player.addListener(listener)
@@ -414,18 +474,20 @@ private fun VideoPage(
     asset: Asset,
     active: Boolean,
     chrome: Boolean,
-    controlsBottom: androidx.compose.ui.unit.Dp,
+    controlsBottom: Dp,
     onTap: () -> Unit,
 ) {
     val p = LocalPalette.current
+    val s = vm.settings
     val context = LocalContext.current
-    val video = asset.playbackVideo
+    // A copy kept offline plays from the device; otherwise stream from iCloud.
+    val video = asset.offlineVideo?.takeIf { vm.mediaUri(it).scheme == "file" } ?: asset.playbackVideo
     Box(Modifier.fillMaxSize()) {
         val poster = asset.medium ?: asset.thumbnail
         if (poster != null) {
             AsyncImage(
                 model = remember(poster.checksum) {
-                    ImageRequest.Builder(context).data(poster.url).memoryCacheKey(poster.checksum).diskCacheKey(poster.checksum)
+                    ImageRequest.Builder(context).data(vm.model(poster)).memoryCacheKey(poster.checksum).diskCacheKey(poster.checksum)
                         .placeholderMemoryCacheKey(asset.thumbnail?.checksum).build()
                 },
                 contentDescription = asset.filename,
@@ -439,7 +501,10 @@ private fun VideoPage(
             return@Box
         }
         if (active) {
-            val player = remember(asset.id) { newPlayer(context, vm.http, video.url).apply { playWhenReady = true } }
+            val player = remember(asset.id) {
+                newPlayer(context, vm.http, vm.mediaUri(video), loop = s.loopVideos, muted = s.startMuted)
+                    .apply { playWhenReady = s.autoplayVideos }
+            }
             // Start from the stored dimensions; the decoder's real (rotation-corrected) size replaces it.
             var videoSize by remember(asset.id) {
                 mutableStateOf(
@@ -449,10 +514,14 @@ private fun VideoPage(
             }
             DisposableEffect(player) {
                 val listener = object : Player.Listener {
-                    override fun onVideoSizeChanged(size: VideoSize) {
-                        if (size.width > 0 && size.height > 0) {
-                            videoSize = Size(size.width * size.pixelWidthHeightRatio, size.height.toFloat())
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (videoSize.width > 0 && videoSize.height > 0) {
+                            setSize(Size(videoSize.width * videoSize.pixelWidthHeightRatio, videoSize.height.toFloat()))
                         }
+                    }
+
+                    private fun setSize(s2: Size) {
+                        videoSize = s2
                     }
                 }
                 player.addListener(listener)
@@ -473,7 +542,7 @@ private fun VideoPage(
                     modifier = Modifier.align(Alignment.Center).aspectRatio(videoSize.width / videoSize.height),
                 )
             }
-            VideoControls(player, visible = chrome, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp))
+            VideoControls(player, visible = chrome, startMuted = s.startMuted, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp))
         } else {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })
             Box(
@@ -487,12 +556,12 @@ private fun VideoPage(
 }
 
 @Composable
-private fun VideoControls(player: ExoPlayer, visible: Boolean, modifier: Modifier) {
+private fun VideoControls(player: ExoPlayer, visible: Boolean, startMuted: Boolean, modifier: Modifier) {
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(true) }
     var buffering by remember { mutableStateOf(true) }
-    var muted by remember { mutableStateOf(false) }
+    var muted by remember { mutableStateOf(startMuted) }
     var scrub by remember { mutableFloatStateOf(-1f) }
     LaunchedEffect(player) {
         while (true) {
@@ -504,13 +573,13 @@ private fun VideoControls(player: ExoPlayer, visible: Boolean, modifier: Modifie
         }
     }
     Box(modifier.fillMaxWidth()) {
-        if (buffering) {
+        if (buffering && playing) {
             CircularProgressIndicator(
                 Modifier.align(Alignment.Center).padding(bottom = 200.dp).size(34.dp),
                 color = Color.White, strokeWidth = 3.dp,
             )
         }
-        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+        AnimatedVisibility(visible = visible || !playing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
             Row(
                 Modifier
                     .padding(horizontal = 14.dp)
@@ -550,9 +619,28 @@ private fun VideoControls(player: ExoPlayer, visible: Boolean, modifier: Modifie
 }
 
 @Composable
-private fun InfoSheet(asset: Asset) {
+private fun InfoSheet(vm: MainViewModel, asset: Asset, editable: Boolean) {
     val p = LocalPalette.current
+    val context = LocalContext.current
+    var caption by remember(asset.id) { mutableStateOf(asset.caption ?: "") }
     Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 28.dp)) {
+        if (editable) {
+            OutlinedTextField(
+                value = caption,
+                onValueChange = { caption = it },
+                placeholder = { Text("Add a Caption") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (caption.trim() != (asset.caption ?: "")) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { vm.setCaption(asset, caption) }) { Text("Save Caption") }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        } else if (!asset.caption.isNullOrBlank()) {
+            Text(asset.caption, color = p.label, fontSize = 16.sp)
+            Spacer(Modifier.height(10.dp))
+        }
         Text(formatFullDate(asset.date), color = p.label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(14.dp))
         InfoLine("Name", asset.filename)
@@ -564,7 +652,27 @@ private fun InfoSheet(asset: Asset) {
             if (asset.isLive) append(" • Live Photo")
             if (asset.isVideo && asset.durationSec != null) append(" • " + formatDuration(asset.durationSec))
         })
-        if (asset.edited != null) InfoLine("Edited", "Yes — sharing and saving use the edited version")
+        val lat = asset.latitude
+        val lon = asset.longitude
+        if (lat != null && lon != null) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Text("Location", color = p.secondaryLabel, fontSize = 13.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Place, null, tint = p.accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("%.5f, %.5f".format(lat, lon), color = p.label, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        vm.expectingExternal = true
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon")))
+                        }.onFailure { vm.toast("No maps app installed") }
+                    }) { Text("Open in Maps") }
+                }
+                Spacer(Modifier.height(6.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = p.separator)
+            }
+        }
+        if (asset.isEdited) InfoLine("Edited", "Yes — sharing and saving use the edited version")
         if (asset.isFavorite) InfoLine("Favourite", "Yes")
         if (asset.addedDate > 0) InfoLine("Added to iCloud", formatFullDate(asset.addedDate))
     }

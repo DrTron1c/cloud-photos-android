@@ -4,20 +4,23 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
@@ -43,13 +46,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Collections
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -66,6 +69,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,29 +81,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import io.github.drtron1c.cloudphotos.photos.AlbumKind
-import io.github.drtron1c.cloudphotos.photos.AlbumSpec
 import io.github.drtron1c.cloudphotos.photos.Asset
-import io.github.drtron1c.cloudphotos.photos.AssetList
+import io.github.drtron1c.cloudphotos.photos.MediaList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 fun gridColumnOptions(widthDp: Int): List<Int> =
@@ -107,36 +118,57 @@ fun gridColumnOptions(widthDp: Int): List<Int> =
 
 const val TAB_BAR_HEIGHT = 56
 
+/** Thumbnail request keyed by content checksum, so it's cached across sessions. */
+@Composable
+fun thumbRequest(vm: MainViewModel, asset: Asset): ImageRequest? {
+    val context = LocalContext.current
+    val thumb = asset.thumbnail ?: return null
+    return remember(thumb.checksum) {
+        ImageRequest.Builder(context)
+            .data(vm.model(thumb))
+            .memoryCacheKey(thumb.checksum)
+            .diskCacheKey(thumb.checksum)
+            .build()
+    }
+}
+
 /**
- * The photo grid used by Library and every album: oldest at the top, opens scrolled to the
- * newest at the bottom, pinch to change density, tap to open, long-press or Select to pick.
+ * The photo grid used by Library, Days view and every album: pinch to change density,
+ * tap to open, long-press (and drag) or Select to pick, swipe across cells to select runs.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PhotoGrid(
     vm: MainViewModel,
-    spec: AlbumSpec,
+    list: MediaList,
     isRoot: Boolean,
     onBack: (() -> Unit)?,
+    title: String = list.spec.title,
+    sections: List<GridEntry>? = null,
+    extraBottom: Dp = 0.dp,
+    headerActions: @Composable RowScope.() -> Unit = {},
     onSelectingChanged: (Boolean) -> Unit = {},
     onUploadClick: (() -> Unit)? = null,
+    jumpTo: Int? = null,
 ) {
     val p = LocalPalette.current
-    val list = vm.list(spec)
+    val s = vm.settings
     val count = list.count
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val widthDp = LocalConfiguration.current.screenWidthDp
     val options = gridColumnOptions(widthDp)
-    val level = vm.gridLevel.coerceIn(0, options.lastIndex)
+    val level = s.gridLevel.coerceIn(0, options.lastIndex)
     val columns = options[level]
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomReserve = navBottom + (if (isRoot) TAB_BAR_HEIGHT.dp else 0.dp)
+    val bottomReserve = navBottom + (if (isRoot) TAB_BAR_HEIGHT.dp else 0.dp) + extraBottom
+    val editable = list.spec.editable && !vm.offlineMode
 
     var selecting by remember { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Asset>() }
     var confirmDelete by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var addToAlbum by remember { mutableStateOf<List<Asset>?>(null) }
     fun endSelection() {
         selecting = false
         selected.clear()
@@ -149,27 +181,97 @@ fun PhotoGrid(
             count < 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
             }
-            count == 0 -> EmptyAlbum(spec, list)
+            count == 0 -> EmptyAlbum(list)
             else -> {
-                val state = rememberSaveable(spec.key, vm.zone, saver = LazyGridState.Saver) {
-                    LazyGridState(firstVisibleItemIndex = (count - 1).coerceAtLeast(0))
+                val entryCount = sections?.size ?: count
+                val newestTop = s.newestOnTop
+                val state = rememberSaveable(list.key, sections != null, saver = LazyGridState.Saver) {
+                    LazyGridState(firstVisibleItemIndex = jumpTo ?: if (newestTop) 0 else (entryCount - 1).coerceAtLeast(0))
                 }
                 if (isRoot) {
                     LaunchedEffect(vm.scrollToNewest) {
-                        if (vm.scrollToNewest > 0 && list.count > 0) state.animateScrollToItem(list.count - 1)
+                        if (vm.scrollToNewest > 0) state.animateScrollToItem(if (newestTop) 0 else (entryCount - 1).coerceAtLeast(0))
                     }
                 }
+                LaunchedEffect(jumpTo) { if (jumpTo != null) state.scrollToItem(jumpTo.coerceIn(0, (entryCount - 1).coerceAtLeast(0))) }
 
                 // Coming back from the viewer: make sure the photo you ended on is on screen.
                 LaunchedEffect(vm.lastViewed) {
                     val lv = vm.lastViewed ?: return@LaunchedEffect
-                    if (lv.first != spec.key) return@LaunchedEffect
+                    if (lv.first != list.key) return@LaunchedEffect
+                    val target = if (sections == null) lv.second
+                    else sections.indexOfFirst { it is GridEntry.Item && it.index == lv.second }
                     val visible = state.layoutInfo.visibleItemsInfo.map { it.index }
-                    if (lv.second !in visible) state.scrollToItem(lv.second.coerceIn(0, (list.count - 1).coerceAtLeast(0)))
+                    if (target >= 0 && target !in visible) state.scrollToItem(target.coerceIn(0, (entryCount - 1).coerceAtLeast(0)))
                     vm.lastViewed = null
                 }
 
+                // ---- swipe / long-press-drag selection ----
+                var dragAnchor by remember { mutableIntStateOf(-1) }
+                var dragAdds by remember { mutableStateOf(true) }
+                var dragBase by remember { mutableStateOf<Map<String, Asset>>(emptyMap()) }
+                var lastPointer by remember { mutableStateOf(Offset.Unspecified) }
+                var gridHeight by remember { mutableIntStateOf(0) }
+                val density = LocalDensity.current
+
+                fun keyAt(pos: Offset): Int? {
+                    val info = state.layoutInfo
+                    val y = pos.y.roundToInt() + info.viewportStartOffset
+                    val x = pos.x.roundToInt()
+                    return info.visibleItemsInfo.firstOrNull {
+                        it.key is Int && x >= it.offset.x && x < it.offset.x + it.size.width &&
+                            y >= it.offset.y && y < it.offset.y + it.size.height
+                    }?.key as? Int
+                }
+
+                fun applyDrag(to: Int) {
+                    if (dragAnchor < 0) return
+                    val next = HashMap(dragBase)
+                    for (i in min(dragAnchor, to)..max(dragAnchor, to)) {
+                        val a = list[i] ?: continue
+                        if (dragAdds) next[a.id] = a else next.remove(a.id)
+                    }
+                    selected.clear()
+                    selected.putAll(next)
+                }
+
+                fun beginDrag(pos: Offset): Boolean {
+                    val k = keyAt(pos) ?: return false
+                    val a = list[k] ?: return false
+                    dragBase = selected.toMap()
+                    dragAdds = !selected.containsKey(a.id)
+                    dragAnchor = k
+                    lastPointer = pos
+                    applyDrag(k)
+                    return true
+                }
+
+                fun endDrag() {
+                    dragAnchor = -1
+                    lastPointer = Offset.Unspecified
+                }
+
+                LaunchedEffect(dragAnchor >= 0) {
+                    val edge = with(density) { 90.dp.toPx() }
+                    while (dragAnchor >= 0) {
+                        val pt = lastPointer
+                        if (pt != Offset.Unspecified && gridHeight > 0) {
+                            val delta = when {
+                                pt.y < edge -> -(edge - pt.y) / 4f
+                                pt.y > gridHeight - edge -> (pt.y - (gridHeight - edge)) / 4f
+                                else -> 0f
+                            }
+                            if (delta != 0f) {
+                                state.scrollBy(delta)
+                                keyAt(pt)?.let { applyDrag(it) }
+                            }
+                        }
+                        delay(16)
+                    }
+                }
+
                 val levelNow by rememberUpdatedState(level)
+                val selectingNow by rememberUpdatedState(selecting)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
                     state = state,
@@ -178,7 +280,9 @@ fun PhotoGrid(
                     contentPadding = PaddingValues(top = statusTop + 64.dp, bottom = bottomReserve + 12.dp),
                     modifier = Modifier
                         .fillMaxSize()
+                        .onSizeChanged { gridHeight = it.height }
                         .pointerInput(options.size) {
+                            // Pinch to change how many photos fit across, like iPhone.
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 var zoom = 1f
@@ -196,49 +300,119 @@ fun PhotoGrid(
                                     else if (zoom < 0.83f && levelNow < options.lastIndex) vm.changeGridLevel(levelNow + 1)
                                 }
                             }
-                        },
+                        }
+                        .pointerInput(list.key) {
+                            // Long-press a photo to start selecting, keep dragging to select more.
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { pos ->
+                                    if (!selectingNow) selecting = true
+                                    if (beginDrag(pos) && s.haptics) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    lastPointer = change.position
+                                    keyAt(change.position)?.let { applyDrag(it) }
+                                },
+                                onDragEnd = { endDrag() },
+                                onDragCancel = { endDrag() },
+                            )
+                        }
+                        .then(
+                            if (selecting) Modifier.pointerInput("swipe-" + list.key) {
+                                // In Select mode, swipe sideways across photos to select a run (iPhone style).
+                                detectHorizontalDragGestures(
+                                    onDragStart = { pos -> beginDrag(pos) },
+                                    onDragEnd = { endDrag() },
+                                    onDragCancel = { endDrag() },
+                                ) { change, _ ->
+                                    change.consume()
+                                    lastPointer = change.position
+                                    keyAt(change.position)?.let { applyDrag(it) }
+                                }
+                            } else Modifier
+                        ),
                 ) {
-                    items(count = count, key = { it }) { index ->
-                        val asset = list[index]
-                        LaunchedEffect(index, asset == null) { list.ensure(index) }
-                        GridCell(
-                            vm = vm,
-                            asset = asset,
-                            dense = columns >= 9,
-                            selecting = selecting,
-                            isSelected = asset != null && selected.containsKey(asset.id),
-                            onClick = {
-                                if (asset == null) return@GridCell
-                                if (selecting) {
-                                    if (selected.containsKey(asset.id)) selected.remove(asset.id) else selected[asset.id] = asset
-                                } else {
-                                    vm.open(Route.Viewer(spec, index))
+                    if (sections == null) {
+                        items(count = count, key = { it }) { index ->
+                            val asset = list[index]
+                            LaunchedEffect(index, asset == null) { list.ensure(index) }
+                            GridCell(
+                                vm = vm,
+                                asset = asset,
+                                dense = columns >= 9,
+                                selecting = selecting,
+                                isSelected = asset != null && selected.containsKey(asset.id),
+                                onClick = {
+                                    if (asset == null) return@GridCell
+                                    if (selecting) {
+                                        if (selected.containsKey(asset.id)) selected.remove(asset.id) else selected[asset.id] = asset
+                                    } else {
+                                        vm.open(Route.Viewer(list.key, index))
+                                    }
+                                },
+                            )
+                        }
+                    } else {
+                        items(
+                            count = sections.size,
+                            key = { i ->
+                                when (val e = sections[i]) {
+                                    is GridEntry.Header -> e.key
+                                    is GridEntry.Item -> e.index
                                 }
                             },
-                            onLongClick = {
-                                if (asset == null) return@GridCell
-                                selecting = true
-                                selected[asset.id] = asset
-                            },
-                        )
+                            span = { i -> if (sections[i] is GridEntry.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
+                        ) { i ->
+                            when (val e = sections[i]) {
+                                is GridEntry.Header -> DayHeader(e)
+                                is GridEntry.Item -> {
+                                    val asset = list[e.index]
+                                    LaunchedEffect(e.index, asset == null) { list.ensure(e.index) }
+                                    GridCell(
+                                        vm = vm,
+                                        asset = asset,
+                                        dense = columns >= 9,
+                                        selecting = selecting,
+                                        isSelected = asset != null && selected.containsKey(asset.id),
+                                        onClick = {
+                                            if (asset == null) return@GridCell
+                                            if (selecting) {
+                                                if (selected.containsKey(asset.id)) selected.remove(asset.id) else selected[asset.id] = asset
+                                            } else {
+                                                vm.open(Route.Viewer(list.key, e.index))
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        FooterCount(list)
-                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) { FooterCount(list) }
                 }
 
                 Scrubber(
                     state = state,
-                    count = count,
-                    label = { i -> list[i]?.let { formatMonth(it.date) } },
+                    count = entryCount,
+                    label = { i ->
+                        val idx = if (sections == null) i else (sections.getOrNull(i) as? GridEntry.Item)?.index
+                        idx?.let { list[it] }?.let { formatMonth(it.date) }
+                    },
                     top = statusTop + 70.dp,
                     bottom = bottomReserve + 16.dp,
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
 
                 // Header: date of what's on screen (Library) or the album title.
-                val firstDate by remember(state) {
-                    derivedStateOf { list[state.firstVisibleItemIndex]?.date ?: 0L }
+                val firstDate by remember(state, sections) {
+                    derivedStateOf {
+                        val first = state.firstVisibleItemIndex
+                        val idx = if (sections == null) first else {
+                            var k = first
+                            while (k < sections.size && sections[k] !is GridEntry.Item) k++
+                            (sections.getOrNull(k) as? GridEntry.Item)?.index ?: -1
+                        }
+                        list[idx]?.date ?: 0L
+                    }
                 }
                 Box(
                     Modifier
@@ -261,11 +435,11 @@ fun PhotoGrid(
                         Spacer(Modifier.width(10.dp))
                     }
                     Column(Modifier.weight(1f)) {
-                        val title = if (isRoot) {
+                        val heading = if (isRoot) {
                             if (columns >= 9) formatMonth(firstDate) else formatShortDay(firstDate)
-                        } else spec.title
+                        } else title
                         Text(
-                            title.ifEmpty { spec.title },
+                            heading.ifEmpty { title },
                             color = Color.White,
                             fontSize = if (isRoot) 26.sp else 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -289,6 +463,7 @@ fun PhotoGrid(
                             Pill(icon = Icons.Filled.Add, onClick = onUploadClick)
                             Spacer(Modifier.width(8.dp))
                         }
+                        headerActions()
                         Pill(text = "Select", onClick = { selecting = true })
                         if (isRoot) {
                             Spacer(Modifier.width(8.dp))
@@ -313,6 +488,7 @@ fun PhotoGrid(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val chosen = selected.values.toList()
+            val tint = if (chosen.isNotEmpty()) p.accent else p.secondaryLabel
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -322,52 +498,70 @@ fun PhotoGrid(
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                when (spec.kind) {
-                    AlbumKind.Deleted -> {
+                when {
+                    list.spec.kind == AlbumKind.Deleted -> {
                         TextButton(onClick = { vm.recover(chosen) { endSelection() } }, enabled = chosen.isNotEmpty()) {
                             Text("Recover", fontSize = 16.sp)
                         }
                         SelectedLabel(chosen.size, Modifier.weight(1f))
                         Spacer(Modifier.width(80.dp))
                     }
+                    vm.offlineMode -> {
+                        SelectedLabel(chosen.size, Modifier.weight(1f))
+                    }
                     else -> {
                         IconButton(onClick = { vm.share(chosen) { context.startActivity(it) } }, enabled = chosen.isNotEmpty()) {
-                            Icon(Icons.Outlined.Share, "Share", tint = if (chosen.isNotEmpty()) p.accent else p.secondaryLabel)
+                            Icon(Icons.Outlined.Share, "Share", tint = tint)
                         }
                         SelectedLabel(chosen.size, Modifier.weight(1f))
                         Box {
                             IconButton(onClick = { menu = true }, enabled = chosen.isNotEmpty()) {
-                                Icon(Icons.Outlined.MoreHoriz, "More", tint = if (chosen.isNotEmpty()) p.accent else p.secondaryLabel)
+                                Icon(Icons.Outlined.MoreHoriz, "More", tint = tint)
                             }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                val allFav = chosen.all { it.isFavorite }
-                                DropdownMenuItem(
-                                    text = { Text(if (allFav) "Unfavourite" else "Favourite") },
-                                    leadingIcon = { Icon(if (allFav) Icons.Outlined.FavoriteBorder else Icons.Filled.Favorite, null) },
-                                    onClick = { menu = false; vm.setFavorite(chosen, !allFav) { endSelection() } },
-                                )
+                                if (editable) {
+                                    val allFav = chosen.all { it.isFavorite }
+                                    DropdownMenuItem(
+                                        text = { Text(if (allFav) "Unfavourite" else "Favourite") },
+                                        leadingIcon = { Icon(if (allFav) Icons.Outlined.FavoriteBorder else Icons.Filled.Favorite, null) },
+                                        onClick = { menu = false; vm.setFavorite(chosen, !allFav) { endSelection() } },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Add to Album") },
+                                        leadingIcon = { Icon(Icons.Outlined.Collections, null) },
+                                        onClick = { menu = false; addToAlbum = chosen },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Save to Device") },
                                     leadingIcon = { Icon(Icons.Outlined.Download, null) },
                                     onClick = { menu = false; vm.saveToDevice(chosen); endSelection() },
                                 )
-                                if (spec.kind == AlbumKind.Hidden) {
-                                    DropdownMenuItem(
-                                        text = { Text("Unhide") },
-                                        leadingIcon = { Icon(Icons.Outlined.Visibility, null) },
-                                        onClick = { menu = false; vm.setHidden(chosen, false) { endSelection() } },
-                                    )
-                                } else {
-                                    DropdownMenuItem(
-                                        text = { Text("Hide") },
-                                        leadingIcon = { Icon(Icons.Outlined.VisibilityOff, null) },
-                                        onClick = { menu = false; vm.setHidden(chosen, true) { endSelection() } },
-                                    )
+                                if (editable) {
+                                    if (list.spec.kind == AlbumKind.Hidden) {
+                                        DropdownMenuItem(
+                                            text = { Text("Unhide") },
+                                            leadingIcon = { Icon(Icons.Outlined.Visibility, null) },
+                                            onClick = { menu = false; vm.setHidden(chosen, false) { endSelection() } },
+                                        )
+                                    } else {
+                                        DropdownMenuItem(
+                                            text = { Text("Hide") },
+                                            leadingIcon = { Icon(Icons.Outlined.VisibilityOff, null) },
+                                            onClick = { menu = false; vm.setHidden(chosen, true) { endSelection() } },
+                                        )
+                                    }
                                 }
                             }
                         }
-                        IconButton(onClick = { confirmDelete = true }, enabled = chosen.isNotEmpty()) {
-                            Icon(Icons.Outlined.Delete, "Delete", tint = if (chosen.isNotEmpty()) p.accent else p.secondaryLabel)
+                        if (editable) {
+                            IconButton(onClick = {
+                                if (s.confirmDelete) confirmDelete = true else vm.delete(chosen) { endSelection() }
+                            }, enabled = chosen.isNotEmpty()) {
+                                Icon(Icons.Outlined.Delete, "Delete", tint = tint)
+                            }
+                        } else {
+                            Spacer(Modifier.width(48.dp))
                         }
                     }
                 }
@@ -390,6 +584,18 @@ fun PhotoGrid(
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
+    addToAlbum?.let { assets ->
+        AddToAlbumDialog(vm, assets, onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null; endSelection() })
+    }
+}
+
+@Composable
+private fun DayHeader(e: GridEntry.Header) {
+    val p = LocalPalette.current
+    Column(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 18.dp, bottom = 6.dp)) {
+        Text(e.title, color = p.label, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        if (e.subtitle != null) Text(e.subtitle, color = p.secondaryLabel, fontSize = 13.sp)
+    }
 }
 
 @Composable
@@ -401,11 +607,10 @@ private fun SelectedLabel(n: Int, modifier: Modifier) {
         color = p.label,
         fontSize = 15.sp,
         fontWeight = FontWeight.SemiBold,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        textAlign = TextAlign.Center,
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GridCell(
     vm: MainViewModel,
@@ -414,31 +619,23 @@ private fun GridCell(
     selecting: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
 ) {
     val p = LocalPalette.current
-    val context = LocalContext.current
+    val s = vm.settings
     Box(
         Modifier
             .aspectRatio(1f)
-            .background(p.placeholder)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(if (s.aspectGrid) p.background else p.placeholder)
+            .clickable(onClick = onClick)
     ) {
         if (asset != null) {
-            val thumb = asset.thumbnail
-            if (thumb != null) {
-                val req = remember(thumb.checksum) {
-                    ImageRequest.Builder(context)
-                        .data(thumb.url)
-                        .memoryCacheKey(thumb.checksum)
-                        .diskCacheKey(thumb.checksum)
-                        .build()
-                }
+            val req = thumbRequest(vm, asset)
+            if (req != null) {
                 AsyncImage(
                     model = req,
                     contentDescription = asset.filename,
                     imageLoader = vm.imageLoader,
-                    contentScale = ContentScale.Crop,
+                    contentScale = if (s.aspectGrid) ContentScale.Fit else ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -446,7 +643,7 @@ private fun GridCell(
             }
             if (!dense) {
                 val shadow = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 4f))
-                if (asset.isVideo) {
+                if (asset.isVideo && s.showDurations) {
                     Text(
                         formatDuration(asset.durationSec).ifEmpty { "▶" },
                         color = Color.White,
@@ -456,7 +653,7 @@ private fun GridCell(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(5.dp),
                     )
                 }
-                if (asset.isFavorite && !selecting) {
+                if (asset.isFavorite && !selecting && s.showFavouriteBadges) {
                     Icon(
                         Icons.Filled.Favorite, null, tint = Color.White,
                         modifier = Modifier.align(Alignment.BottomStart).padding(5.dp).size(14.dp)
@@ -487,7 +684,7 @@ private fun GridCell(
 }
 
 @Composable
-private fun FooterCount(list: AssetList) {
+private fun FooterCount(list: MediaList) {
     val p = LocalPalette.current
     Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
         val n = list.count
@@ -499,14 +696,12 @@ private fun FooterCount(list: AssetList) {
 }
 
 @Composable
-private fun EmptyAlbum(spec: AlbumSpec, list: AssetList) {
+private fun EmptyAlbum(list: MediaList) {
     val p = LocalPalette.current
+    val spec = list.spec
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-            Icon(
-                if (spec.kind == AlbumKind.Library) Icons.Outlined.Image else Icons.Filled.MotionPhotosOn.takeIf { spec.key == "live" } ?: Icons.Outlined.Image,
-                null, tint = p.secondaryLabel, modifier = Modifier.size(56.dp),
-            )
+            Icon(iconFor(spec), null, tint = p.secondaryLabel, modifier = Modifier.size(56.dp))
             Spacer(Modifier.height(14.dp))
             Text("No Photos or Videos", color = p.label, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
@@ -514,9 +709,11 @@ private fun EmptyAlbum(spec: AlbumSpec, list: AssetList) {
                 when (spec.kind) {
                     AlbumKind.Deleted -> "Items you delete stay here for 30 days."
                     AlbumKind.Hidden -> "Items you hide will appear here."
+                    AlbumKind.Virtual -> "Nothing matches."
                     else -> "Nothing in ${spec.title} yet."
                 },
                 color = p.secondaryLabel,
+                textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = { list.refresh() }) { Text("Refresh") }
@@ -530,8 +727,8 @@ private fun Scrubber(
     state: LazyGridState,
     count: Int,
     label: (Int) -> String?,
-    top: androidx.compose.ui.unit.Dp,
-    bottom: androidx.compose.ui.unit.Dp,
+    top: Dp,
+    bottom: Dp,
     modifier: Modifier = Modifier,
 ) {
     val p = LocalPalette.current

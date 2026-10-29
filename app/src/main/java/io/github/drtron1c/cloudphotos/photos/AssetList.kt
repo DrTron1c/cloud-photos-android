@@ -8,81 +8,75 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
- * A lazily-loaded, position-addressed view of one album.
+ * A lazily-loaded, position-addressed view of one CloudKit album.
  *
  * iCloud ranks items newest-first (rank 0 = most recent), and data is stored by rank.
- * The public index is the *display* position, oldest first like the iPhone grid
- * (newest at the bottom): index = count - 1 - rank. Cells ask for their index and the
- * list fetches the surrounding run of items on demand, so huge libraries scroll and
- * scrub without loading everything.
+ * The public index is the *display* position: oldest first like the iPhone grid
+ * (newest at the bottom) unless [newestOnTop]. Cells ask for their index and the list
+ * fetches the surrounding run of items on demand, so huge libraries scroll and scrub
+ * without loading everything.
  */
 class AssetList(
-    val spec: AlbumSpec,
+    override val key: String,
+    override val spec: AlbumSpec,
     private val api: PhotosApi,
     private val scope: CoroutineScope,
+    private val newestOnTop: Boolean,
     private val onError: (Throwable) -> Unit,
-) {
-    var count by mutableIntStateOf(-1)
+) : MediaList {
+    override var count by mutableIntStateOf(-1)
         private set
-    var loading by mutableStateOf(false)
-        private set
-    var refreshing by mutableStateOf(false)
+    override var refreshing by mutableStateOf(false)
         private set
 
+    private val items = mutableStateMapOf<Int, Asset>() // keyed by rank
     private val loadedAt = HashMap<Int, Long>()
     private val inFlight = HashSet<Int>()
-    private val mutex = Mutex()
     private var generation = 0
     private var countJob: Job? = null
 
-    private val items = mutableStateMapOf<Int, Asset>() // keyed by rank
+    private fun rankFor(index: Int, c: Int = count) = if (newestOnTop) index else c - 1 - index
+    private fun indexFor(rank: Int, c: Int = count) = if (newestOnTop) rank else c - 1 - rank
 
-    /** Item at display position [index] (0 = oldest). */
-    operator fun get(index: Int): Asset? {
+    /** Display position for iCloud rank [rank]. */
+    fun positionOfRank(rank: Int): Int = indexFor(rank)
+
+    /** Item at display position [index]. */
+    override operator fun get(index: Int): Asset? {
         val c = count
-        return if (c <= 0 || index < 0 || index >= c) null else items[c - 1 - index]
+        return if (c <= 0 || index < 0 || index >= c) null else items[rankFor(index, c)]
     }
 
     private fun rankOf(assetId: String): Int = items.entries.firstOrNull { it.value.id == assetId }?.key ?: -1
 
     /** Display position of an asset, or -1 if it isn't loaded. */
-    fun indexOf(assetId: String): Int {
+    override fun indexOf(assetId: String): Int {
         val r = rankOf(assetId)
-        return if (r < 0) -1 else count - 1 - r
+        return if (r < 0) -1 else indexFor(r)
     }
 
-    fun start() {
+    override fun start() {
         if (count >= 0 || countJob?.isActive == true) return
-        loadCount()
-    }
-
-    private fun loadCount() {
-        loading = true
         countJob = scope.launch {
             try {
                 count = api.count(spec)
             } catch (e: Throwable) {
                 if (count < 0) count = 0
                 onError(e)
-            } finally {
-                loading = false
             }
         }
     }
 
-    fun refresh() {
+    override fun refresh() {
         if (refreshing) return
         refreshing = true
         scope.launch {
             try {
                 val gen = ++generation
                 val newCount = api.count(spec)
-                mutex.withLock {
-                    if (gen != generation) return@withLock
+                if (gen == generation) {
                     items.clear()
                     loadedAt.clear()
                     inFlight.clear()
@@ -97,7 +91,7 @@ class AssetList(
     }
 
     /** Cheap check (one count query); reloads only if the album changed size. */
-    fun checkForChanges() {
+    override fun checkForChanges() {
         if (count < 0 || refreshing) return
         scope.launch {
             try {
@@ -109,14 +103,15 @@ class AssetList(
     }
 
     /** Make sure display position [index] (and its neighbours) are loaded with fresh download links. */
-    fun ensure(index: Int) {
+    override fun ensure(index: Int) {
         val c = count
         if (c <= 0 || index < 0 || index >= c) return
-        ensureRank(c - 1 - index)
+        ensureRank(rankFor(index, c))
     }
 
     private fun ensureRank(rank: Int) {
         val c = count
+        if (rank < 0 || rank >= c) return
         val now = System.currentTimeMillis()
         val have = items[rank]
         val stamp = loadedAt[rank] ?: 0L
@@ -132,8 +127,7 @@ class AssetList(
         scope.launch {
             try {
                 val page = api.page(spec, start, PAGE)
-                mutex.withLock {
-                    if (gen != generation) return@withLock
+                if (gen == generation) {
                     val t = System.currentTimeMillis()
                     page.forEachIndexed { i, asset ->
                         items[start + i] = asset
@@ -158,33 +152,34 @@ class AssetList(
     }
 
     /** Replace an item after an edit (favourite etc.). */
-    fun update(asset: Asset) {
+    override fun update(asset: Asset) {
         val r = rankOf(asset.id)
         if (r >= 0) items[r] = asset
     }
 
     /** Drop items that left this album (deleted, hidden, recovered…) and close the gaps. */
-    fun removeAll(ids: Set<String>) {
+    override fun removeAll(ids: Set<String>) {
         if (ids.isEmpty()) return
-        val positions = items.entries.filter { it.value.id in ids }.map { it.key }.sorted()
-        if (positions.isEmpty()) {
+        val ranks = items.entries.filter { it.value.id in ids }.map { it.key }.sorted()
+        if (ranks.isEmpty()) {
             refresh(); return
         }
         val snapshot = items.toMap()
         val stamps = HashMap(loadedAt)
         items.clear()
         loadedAt.clear()
-        for ((idx, asset) in snapshot) {
+        for ((r, asset) in snapshot) {
             if (asset.id in ids) continue
-            val shift = positions.count { it < idx }
-            items[idx - shift] = asset
-            stamps[idx]?.let { loadedAt[idx - shift] = it }
+            val shift = ranks.count { it < r }
+            items[r - shift] = asset
+            stamps[r]?.let { loadedAt[r - shift] = it }
         }
-        count = (count - positions.size).coerceAtLeast(0)
+        count = (count - ranks.size).coerceAtLeast(0)
     }
 
     companion object {
-        const val PAGE = 120
+        /** CloudKit answers at most 200 records per query; each photo is 2 (asset + master). */
+        const val PAGE = 100
         const val LOOK_BEHIND = 40
         const val STALE_MS = 40 * 60 * 1000L
     }

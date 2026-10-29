@@ -11,7 +11,16 @@ data class Version(
     val fileType: String?,
     val width: Int,
     val height: Int,
-)
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("u", url).put("s", size).put("c", checksum).put("t", fileType ?: "").put("w", width).put("h", height)
+
+    companion object {
+        fun fromJson(o: JSONObject?): Version? = o?.let {
+            Version(it.optString("u"), it.optLong("s"), it.optString("c"), it.optString("t").ifEmpty { null }, it.optInt("w"), it.optInt("h"))
+        }
+    }
+}
 
 data class Asset(
     val id: String,               // CPLMaster recordName (stable across edits)
@@ -34,6 +43,10 @@ data class Asset(
     val original: Version?,
     val liveVideo: Version?,      // Live Photo motion
     val videoMedium: Version?,
+    val caption: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val isEdited: Boolean = false,
 ) {
     val isLive get() = !isVideo && liveVideo != null
 
@@ -55,6 +68,10 @@ data class Asset(
     val playbackVideo: Version?
         get() = if (isVideo) edited ?: original ?: videoMedium else null
 
+    /** Smaller stream used for offline copies. */
+    val offlineVideo: Version?
+        get() = if (isVideo) videoMedium ?: edited ?: original else null
+
     val currentFilename: String
         get() {
             val cur = current ?: return filename
@@ -63,7 +80,29 @@ data class Asset(
             return base + "." + extensionFor(cur.fileType, if (isVideo) "MOV" else "JPG")
         }
 
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id).put("ar", assetRecordName).put("at", assetRecordType).put("ct", changeTag)
+        .put("d", date).put("ad", addedDate).put("f", isFavorite).put("hi", isHidden).put("it", itemType)
+        .put("fn", filename).put("w", width).put("h", height).put("v", isVideo).put("du", durationSec ?: -1.0)
+        .putOpt("th", thumb?.toJson()).putOpt("me", medium?.toJson()).putOpt("ed", edited?.toJson())
+        .putOpt("or", original?.toJson()).putOpt("lv", liveVideo?.toJson()).putOpt("vm", videoMedium?.toJson())
+        .putOpt("cap", caption).putOpt("lat", latitude).putOpt("lon", longitude).put("ie", isEdited)
+
     companion object {
+        fun fromJson(o: JSONObject): Asset = Asset(
+            id = o.optString("id"), assetRecordName = o.optString("ar"), assetRecordType = o.optString("at", "CPLAsset"),
+            changeTag = o.optString("ct"), date = o.optLong("d"), addedDate = o.optLong("ad"), isFavorite = o.optBoolean("f"),
+            isHidden = o.optBoolean("hi"), itemType = o.optString("it"), filename = o.optString("fn"), width = o.optInt("w"),
+            height = o.optInt("h"), isVideo = o.optBoolean("v"), durationSec = o.optDouble("du", -1.0).takeIf { it >= 0 },
+            thumb = Version.fromJson(o.optJSONObject("th")), medium = Version.fromJson(o.optJSONObject("me")),
+            edited = Version.fromJson(o.optJSONObject("ed")), original = Version.fromJson(o.optJSONObject("or")),
+            liveVideo = Version.fromJson(o.optJSONObject("lv")), videoMedium = Version.fromJson(o.optJSONObject("vm")),
+            caption = o.optString("cap").ifEmpty { null },
+            latitude = if (o.has("lat")) o.optDouble("lat") else null,
+            longitude = if (o.has("lon")) o.optDouble("lon") else null,
+            isEdited = o.optBoolean("ie"),
+        )
+
         private fun decodable(type: String): Boolean {
             val t = type.lowercase()
             return t.contains("jpeg") || t.contains("heic") || t.contains("heif") || t.contains("png") ||
@@ -103,6 +142,8 @@ data class Asset(
             else -> null
         }
 
+        private fun b64(s: String): ByteArray? = runCatching { java.util.Base64.getMimeDecoder().decode(s) }.getOrNull()
+
         private fun version(fields: JSONObject, prefix: String): Version? {
             val res = fields.optJSONObject("${prefix}Res")?.optJSONObject("value") ?: return null
             val url = res.optString("downloadURL")
@@ -121,16 +162,19 @@ data class Asset(
         private fun pick(asset: JSONObject, master: JSONObject, prefix: String) =
             version(asset, prefix) ?: version(master, prefix)
 
-        private fun decodeFilename(master: JSONObject, fallbackId: String, itemType: String): String {
-            val f = master.optJSONObject("filenameEnc")
-            if (f != null) {
-                val value = f.optString("value")
-                val name = when (f.optString("type")) {
-                    "STRING" -> value
-                    else -> runCatching { String(java.util.Base64.getMimeDecoder().decode(value), Charsets.UTF_8) }.getOrNull()
-                }
-                if (!name.isNullOrBlank()) return name
+        private fun decodeText(f: JSONObject?): String? {
+            if (f == null) return null
+            val value = f.optString("value")
+            if (value.isEmpty()) return null
+            return when (f.optString("type")) {
+                "STRING" -> value
+                else -> b64(value)?.let { String(it, Charsets.UTF_8) }
             }
+        }
+
+        private fun decodeFilename(master: JSONObject, fallbackId: String, itemType: String): String {
+            val name = decodeText(master.optJSONObject("filenameEnc"))
+            if (!name.isNullOrBlank()) return name
             val clean = fallbackId.replace(Regex("[^0-9A-Za-z]"), "_").take(12)
             return clean + "." + extensionFor(itemType, "JPG")
         }
@@ -172,12 +216,17 @@ data class Asset(
                         val s = mf.longField("vidComplDurScale") ?: af.longField("vidComplDurScale")
                         if (isVideo && v != null && s != null && s > 0) v.toDouble() / s else null
                     }
+                val edited = if (isVideo) version(af, "resVidFull") else version(af, "resJPEGFull")
+                val adjustment = af.optJSONObject("adjustmentType")?.optString("value").orEmpty()
+                val location = (af.optJSONObject("locationEnc") ?: mf.optJSONObject("locationEnc"))
+                    ?.optString("value")?.let { b64(it) }?.let { BPlist.latLon(it) }
                 out += Asset(
                     id = id,
                     assetRecordName = a.optString("recordName"),
                     assetRecordType = a.optString("recordType", "CPLAsset"),
                     changeTag = a.optString("recordChangeTag"),
-                    date = af.longField("assetDate") ?: af.longField("addedDate") ?: 0L,
+                    date = af.longField("assetDate") ?: mf.longField("originalCreationDate")
+                        ?: af.longField("addedDate") ?: 0L,
                     addedDate = af.longField("addedDate") ?: 0L,
                     isFavorite = (af.longField("isFavorite") ?: 0L) == 1L,
                     isHidden = (af.longField("isHidden") ?: 0L) == 1L,
@@ -189,10 +238,14 @@ data class Asset(
                     durationSec = if (isVideo) duration else null,
                     thumb = pick(af, mf, "resJPEGThumb"),
                     medium = pick(af, mf, "resJPEGMed"),
-                    edited = if (isVideo) version(af, "resVidFull") else version(af, "resJPEGFull"),
+                    edited = edited,
                     original = original,
                     liveVideo = if (isVideo) null else (pick(af, mf, "resVidMed") ?: version(mf, "resOriginalVidCompl")),
                     videoMedium = if (isVideo) pick(af, mf, "resVidMed") else null,
+                    caption = decodeText(af.optJSONObject("captionEnc")),
+                    latitude = location?.get(0),
+                    longitude = location?.get(1),
+                    isEdited = edited != null || (adjustment.isNotEmpty() && adjustment != "none"),
                 )
             }
             return out
@@ -200,9 +253,9 @@ data class Asset(
     }
 }
 
-enum class AlbumKind { Library, Smart, User, Hidden, Deleted }
+enum class AlbumKind { Library, Smart, User, Hidden, Deleted, Shared, Virtual }
 
-/** How to query one album / collection through CloudKit. */
+/** How to query one album / collection through CloudKit (or where its items come from). */
 data class AlbumSpec(
     val key: String,
     val title: String,
@@ -212,9 +265,20 @@ data class AlbumSpec(
     val filterJson: String? = null,
     val icon: String = "photo",
 ) {
-    fun filters(): JSONArray? = filterJson?.let { JSONArray(it) }
+    fun filters(): JSONArray? = filterJson?.takeIf { it.startsWith("[") }?.let { JSONArray(it) }
+
+    /** Items can be favourited / deleted / hidden (not Shared Albums). */
+    val editable get() = kind != AlbumKind.Shared
+
+    fun toJson(): JSONObject = JSONObject().put("k", key).put("t", title).put("kind", kind.name)
+        .put("o", objType).put("l", listType).putOpt("f", filterJson).put("i", icon)
 
     companion object {
+        fun fromJson(o: JSONObject) = AlbumSpec(
+            o.optString("k"), o.optString("t"), runCatching { AlbumKind.valueOf(o.optString("kind")) }.getOrDefault(AlbumKind.User),
+            o.optString("o"), o.optString("l"), o.optString("f").ifEmpty { null }, o.optString("i", "photo"),
+        )
+
         private fun smart(key: String, title: String, smart: String, objSuffix: String, icon: String) = AlbumSpec(
             key = key,
             title = title,
@@ -228,6 +292,10 @@ data class AlbumSpec(
         val LIBRARY = AlbumSpec(
             "library", "Library", AlbumKind.Library,
             "CPLAssetByAssetDateWithoutHiddenOrDeleted", "CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted",
+        )
+        val RECENTLY_SAVED = AlbumSpec(
+            "recentlysaved", "Recently Saved", AlbumKind.Library,
+            "CPLAssetByAssetDateWithoutHiddenOrDeleted", "CPLAssetAndMasterByAddedDate", icon = "saved",
         )
         val FAVORITES = smart("favorites", "Favourites", "FAVORITE", "Favorite", "favorite")
         val VIDEOS = smart("videos", "Videos", "VIDEO", "Video", "video")
@@ -258,6 +326,41 @@ data class AlbumSpec(
             listType = "CPLContainerRelationLiveByAssetDate",
             filterJson = """[{"fieldName":"parentId","comparator":"EQUALS","fieldValue":{"type":"STRING","value":"$recordName"}}]""",
             icon = "album",
+        )
+
+        fun shared(album: SharedAlbum) = AlbumSpec(
+            key = "shared:${album.guid}",
+            title = album.name,
+            kind = AlbumKind.Shared,
+            objType = "",
+            listType = "",
+            filterJson = album.toJson().toString(),
+            icon = "shared",
+        )
+
+        /** Collections computed on the phone (search results, duplicates, recently edited/viewed…). */
+        fun virtual(key: String, title: String, icon: String = "photo") =
+            AlbumSpec("virtual:$key", title, AlbumKind.Virtual, "", "", icon = icon)
+    }
+}
+
+/** An iCloud Shared Album (the legacy "shared streams" service). */
+data class SharedAlbum(
+    val name: String,
+    val location: String,
+    val guid: String,
+    val ctag: String,
+    val owner: String,
+    val sharingType: String,
+) {
+    val ownedByMe get() = sharingType == "owned"
+
+    fun toJson(): JSONObject = JSONObject().put("n", name).put("l", location).put("g", guid).put("c", ctag)
+        .put("o", owner).put("s", sharingType)
+
+    companion object {
+        fun fromJson(o: JSONObject) = SharedAlbum(
+            o.optString("n"), o.optString("l"), o.optString("g"), o.optString("c"), o.optString("o"), o.optString("s"),
         )
     }
 }

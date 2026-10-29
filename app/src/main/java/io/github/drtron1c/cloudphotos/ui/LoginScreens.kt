@@ -106,8 +106,9 @@ fun SplashScreen() {
 }
 
 @Composable
-fun LoginScreen(state: Phase.Login, onSignIn: (String, String, Boolean) -> Unit) {
+fun LoginScreen(state: Phase.Login, vm: MainViewModel, onSignIn: (String, String, Boolean) -> Unit) {
     val p = LocalPalette.current
+    var dnsDialog by remember { mutableStateOf(false) }
     var appleId by rememberSaveable { mutableStateOf(state.appleId) }
     var password by rememberSaveable { mutableStateOf("") }
     var show by remember { mutableStateOf(false) }
@@ -193,7 +194,23 @@ fun LoginScreen(state: Phase.Login, onSignIn: (String, String, Boolean) -> Unit)
             "Unofficial app. Not made by or affiliated with Apple.",
             color = p.secondaryLabel, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
+        TextButton(onClick = { dnsDialog = true }) {
+            Text("Network privacy: " + (DNS_OPTIONS.firstOrNull { it.first == vm.settings.dnsProvider }?.second ?: "Encrypted DNS"), fontSize = 13.sp)
+        }
     }
+    if (dnsDialog) DnsDialog(vm) { dnsDialog = false }
+}
+
+/** Lets someone on a network that blocks encrypted DNS still sign in. */
+@Composable
+fun DnsDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+    ChoiceDialog(
+        title = "Encrypted DNS",
+        options = DNS_OPTIONS,
+        selected = vm.settings.dnsProvider,
+        footer = "Looks up Apple's server addresses over HTTPS so your Wi-Fi or mobile provider can't log them. If this network blocks it, pick another provider.",
+        onDismiss = onDismiss,
+    ) { vm.setDns(it); onDismiss() }
 }
 
 @Composable
@@ -310,8 +327,9 @@ fun WaitingScreen(message: String, onCancel: () -> Unit) {
 }
 
 @Composable
-fun FailedScreen(message: String, onRetry: () -> Unit, onSignOut: () -> Unit) {
+fun FailedScreen(message: String, vm: MainViewModel, onRetry: () -> Unit, onSignOut: () -> Unit) {
     val p = LocalPalette.current
+    var dnsDialog by remember { mutableStateOf(false) }
     CenteredColumn {
         AppIcon(72.dp)
         Spacer(Modifier.height(24.dp))
@@ -323,10 +341,12 @@ fun FailedScreen(message: String, onRetry: () -> Unit, onSignOut: () -> Unit) {
             Text("Try Again", fontSize = 17.sp)
         }
         Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { dnsDialog = true }) { Text("Network privacy settings") }
         TextButton(onClick = onSignOut, colors = ButtonDefaults.textButtonColors(contentColor = p.destructive)) {
             Text("Sign Out")
         }
     }
+    if (dnsDialog) DnsDialog(vm) { dnsDialog = false }
 }
 
 @Composable

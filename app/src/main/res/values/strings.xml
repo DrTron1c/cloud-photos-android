@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Cloud Photos</string>
+    <string name="widget_description">A photo from your iCloud library — On this day, favourites or random</string>
+    <string name="shortcut_search">Search</string>
 </resources>

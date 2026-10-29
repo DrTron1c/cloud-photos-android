@@ -101,8 +101,8 @@ class PhotosApi(
         return rec?.optJSONObject("fields")?.optJSONObject("itemCount")?.optLong("value")?.toInt() ?: 0
     }
 
-    /** Assets of [spec] starting at rank [start] (0 = oldest), roughly [want] of them. */
-    suspend fun page(spec: AlbumSpec, start: Int, want: Int): List<Asset> {
+    /** Assets of [spec] starting at iCloud rank [start] (0 = newest), roughly [want] of them. */
+    suspend fun page(spec: AlbumSpec, start: Int, want: Int, keys: JSONArray = DESIRED_KEYS): List<Asset> {
         val filters = JSONArray()
             .put(JSONObject().put("fieldName", "startRank").put("comparator", "EQUALS")
                 .put("fieldValue", JSONObject().put("type", "INT64").put("value", start)))
@@ -113,8 +113,8 @@ class PhotosApi(
         val perAsset = if (spec.kind == AlbumKind.User) 3 else 2
         val body = JSONObject()
             .put("query", JSONObject().put("filterBy", filters).put("recordType", spec.listType))
-            .put("resultsLimit", want * perAsset)
-            .put("desiredKeys", DESIRED_KEYS)
+            .put("resultsLimit", (want * perAsset).coerceAtMost(200))
+            .put("desiredKeys", keys)
             .put("zoneID", zoneId())
         val j = post("/records/query", body)
         return Asset.fromRecords(j.optJSONArray("records") ?: JSONArray())
@@ -148,6 +148,130 @@ class PhotosApi(
             marker = j.optString("continuationMarker").ifEmpty { null }
         } while (marker != null && all.size < 2000)
         return all
+    }
+
+    /** Lightweight page for the on-device library index (dates, names, flags, location). */
+    suspend fun indexPage(start: Int): List<Asset> = page(AlbumSpec.LIBRARY, start, 100, INDEX_KEYS)
+
+    // ---- albums ----
+
+    /** Create a new (empty) album; returns its record name. */
+    suspend fun createAlbum(name: String): String {
+        val recordName = UUID.randomUUID().toString().replace("-", "").uppercase()
+        val enc = java.util.Base64.getEncoder().encodeToString(name.toByteArray(Charsets.UTF_8))
+        fun typed(type: String, value: Any) = JSONObject().put("type", type).put("value", value)
+        val record = JSONObject()
+            .put("recordName", recordName)
+            .put("recordType", "CPLAlbum")
+            .put("fields", JSONObject()
+                .put("albumNameEnc", typed("ENCRYPTED_BYTES", enc))
+                .put("albumType", typed("INT64", 0))
+                .put("isDeleted", typed("INT64", 0))
+                .put("isExpunged", typed("INT64", 0))
+                .put("position", typed("INT64", System.currentTimeMillis()))
+                .put("sortType", typed("INT64", 1))
+                .put("sortAscending", typed("INT64", 1)))
+        val body = JSONObject()
+            .put("operations", JSONArray().put(JSONObject().put("operationType", "create").put("record", record)))
+            .put("zoneID", zoneId())
+            .put("atomic", true)
+        val j = post("/records/modify", body)
+        val rec = j.optJSONArray("records")?.optJSONObject(0)
+        rec?.optString("serverErrorCode")?.ifEmpty { null }?.let {
+            throw PhotosApiException(rec.optString("reason").ifEmpty { "iCloud couldn't create the album ($it)." })
+        }
+        return rec?.optString("recordName")?.ifEmpty { null } ?: recordName
+    }
+
+    /** Add assets to an album (items already in it are left alone). Returns how many were added. */
+    suspend fun addToAlbum(albumRecordName: String, assets: List<Asset>): Int {
+        var added = 0
+        for (chunk in assets.chunked(100)) {
+            val ops = JSONArray()
+            for (a in chunk) {
+                val record = JSONObject()
+                    .put("recordName", "${a.assetRecordName}-IN-$albumRecordName")
+                    .put("recordType", "CPLContainerRelation")
+                    .put("fields", JSONObject()
+                        .put("itemId", JSONObject().put("type", "STRING").put("value", a.assetRecordName))
+                        .put("position", JSONObject().put("type", "INT64").put("value", 1024))
+                        .put("containerId", JSONObject().put("type", "STRING").put("value", albumRecordName)))
+                ops.put(JSONObject().put("operationType", "create").put("record", record))
+            }
+            val j = post("/records/modify", JSONObject().put("operations", ops).put("zoneID", zoneId()).put("atomic", false))
+            val recs = j.optJSONArray("records") ?: JSONArray()
+            for (i in 0 until recs.length()) {
+                val r = recs.optJSONObject(i) ?: continue
+                val err = r.optString("serverErrorCode")
+                if (err.isEmpty() || err == "CONFLICT") added++
+            }
+        }
+        return added
+    }
+
+    /** Set or clear the caption shown under a photo (iPhone: "Add a Caption"). */
+    suspend fun setCaption(asset: Asset, caption: String): Asset {
+        val fields = JSONObject().put(
+            "captionEnc",
+            JSONObject().put("type", "ENCRYPTED_BYTES")
+                .put("value", java.util.Base64.getEncoder().encodeToString(caption.trim().toByteArray(Charsets.UTF_8)))
+        )
+        val tag = updateAsset(asset, fields)
+        return asset.copy(caption = caption.trim().ifEmpty { null }, changeTag = tag)
+    }
+
+    // ---- Shared Albums (legacy shared streams service) ----
+
+    suspend fun sharedAlbums(): List<SharedAlbum> {
+        val root = state.sharedStreamsUrl ?: return emptyList()
+        val dsid = state.dsid ?: throw SessionExpiredException()
+        val r = http.send("POST", "$root/$dsid/sharedstreams/webgetalbumslist?${params()}", rawBody = "{}", textPlain = true)
+        if (r.code == 401 || r.code == 421) throw SessionExpiredException()
+        val arr = r.json()?.optJSONArray("albums") ?: return emptyList()
+        val out = ArrayList<SharedAlbum>()
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONObject(i) ?: continue
+            out += SharedAlbum(
+                name = a.optJSONObject("attributes")?.optString("name").orEmpty().ifEmpty { "Shared Album" },
+                location = a.optString("albumlocation"),
+                guid = a.optString("albumguid"),
+                ctag = a.optString("albumctag"),
+                owner = a.optString("ownerdsid"),
+                sharingType = a.optString("sharingtype"),
+            )
+        }
+        return out.filter { it.location.isNotEmpty() && it.guid.isNotEmpty() }
+    }
+
+    suspend fun sharedAlbumAssets(album: SharedAlbum): List<Asset> {
+        val countRes = http.send(
+            "POST", "${album.location}webgetassetcount?${params()}",
+            jsonBody = JSONObject().put("albumguid", album.guid), textPlain = true,
+        )
+        if (countRes.code == 401 || countRes.code == 421) throw SessionExpiredException()
+        val total = countRes.json()?.optInt("albumassetcount", -1) ?: -1
+        val seen = LinkedHashMap<String, Asset>()
+        var offset = 0
+        while (true) {
+            val r = http.send(
+                "POST", "${album.location}webgetassets?${params()}",
+                jsonBody = JSONObject()
+                    .put("albumguid", album.guid)
+                    .put("albumctag", album.ctag)
+                    .put("limit", (offset + 200).toString())
+                    .put("offset", offset.toString()),
+                textPlain = true,
+            )
+            if (!r.ok) throw PhotosApiException(r.appleError() ?: "Couldn't load ${album.name} (error ${r.code}).")
+            val page = Asset.fromRecords(r.json()?.optJSONArray("records") ?: JSONArray())
+            var fresh = 0
+            for (a in page) if (seen.put(a.id, a) == null) fresh++
+            if (page.isEmpty() || fresh == 0) break
+            offset += page.size
+            if (total in 0..offset) break
+            if (seen.size > 20000) break
+        }
+        return seen.values.sortedBy { it.date }
     }
 
     // ---- edits ----
@@ -198,7 +322,7 @@ class PhotosApi(
 
     // ---- upload (Apple's 2026 three-step flow) ----
 
-    suspend fun upload(file: File, fileName: String, lastModified: Long) {
+    suspend fun upload(file: File, fileName: String, lastModified: Long, zone: String = zoneName) {
         val uploadRoot = state.photosUploadUrl
             ?: throw PhotosApiException("Uploading isn't available for this account on the web.")
         val clientUuid = UUID.randomUUID().toString()
@@ -207,7 +331,7 @@ class PhotosApi(
         // 1. reserve an upload slot sized for the file
         val reserve = http.send(
             "POST", "$uploadRoot/photosupload/createUploadUrl?$p",
-            jsonBody = JSONObject().put("zoneName", zoneName).put("assets", JSONObject().put(clientUuid, file.length())),
+            jsonBody = JSONObject().put("zoneName", zone).put("assets", JSONObject().put(clientUuid, file.length())),
         )
         if (reserve.code == 401 || reserve.code == 421) throw SessionExpiredException()
         val target = reserve.json()?.optJSONObject("uploadUrls")?.optString(clientUuid)?.ifEmpty { null }
@@ -239,7 +363,7 @@ class PhotosApi(
         val put = http.send(
             "POST", "$uploadRoot/photosupload/putAsset?$p",
             jsonBody = JSONObject()
-                .put("zoneName", zoneName)
+                .put("zoneName", zone)
                 .put("files", JSONArray().put(entry))
                 .put("localTimeZoneId", tz.id)
                 .put("importGroup", clientUuid),
@@ -254,7 +378,14 @@ class PhotosApi(
     }
 
     companion object {
-        private val DESIRED_KEYS = JSONArray(
+        val INDEX_KEYS = JSONArray(
+            listOf(
+                "recordName", "recordType", "recordChangeTag", "masterRef", "assetDate", "addedDate", "isFavorite",
+                "isHidden", "itemType", "filenameEnc", "resOriginalRes", "resOriginalFileType", "resOriginalWidth",
+                "resOriginalHeight", "adjustmentType", "locationEnc", "duration", "originalCreationDate",
+            )
+        )
+        val DESIRED_KEYS = JSONArray(
             listOf(
                 "resJPEGFullWidth", "resJPEGFullHeight", "resJPEGFullFileType", "resJPEGFullFingerprint", "resJPEGFullRes",
                 "resJPEGMedWidth", "resJPEGMedHeight", "resJPEGMedFileType", "resJPEGMedFingerprint", "resJPEGMedRes",

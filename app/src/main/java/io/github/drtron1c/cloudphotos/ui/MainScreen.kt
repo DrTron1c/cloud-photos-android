@@ -30,8 +30,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHost
@@ -39,19 +47,24 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
-import io.github.drtron1c.cloudphotos.photos.AlbumSpec
+import io.github.drtron1c.cloudphotos.photos.AlbumKind
+import io.github.drtron1c.cloudphotos.photos.MediaList
 
 @Composable
 fun AppRoot(vm: MainViewModel) {
@@ -59,13 +72,13 @@ fun AppRoot(vm: MainViewModel) {
     Box(Modifier.fillMaxSize()) {
         when (val ph = vm.phase) {
             Phase.Starting -> SplashScreen()
-            is Phase.Login -> LoginScreen(ph) { id, pw, keep -> vm.signIn(id, pw, keep) }
+            is Phase.Login -> LoginScreen(ph, vm) { id, pw, keep -> vm.signIn(id, pw, keep) }
             is Phase.TwoFactor -> TwoFactorScreen(ph, vm)
             is Phase.Waiting -> WaitingScreen(ph.message) { vm.cancelSignIn() }
-            is Phase.Failed -> FailedScreen(ph.message, onRetry = { vm.retryStartup() }, onSignOut = { vm.signOut() })
+            is Phase.Failed -> FailedScreen(ph.message, vm, onRetry = { vm.retryStartup() }, onSignOut = { vm.signOut() })
             Phase.Ready -> MainScreen(vm)
         }
-        if (vm.locked && vm.lockApp) {
+        if (vm.locked && vm.settings.lockApp) {
             val unlock = {
                 if (activity != null) {
                     vm.expectingExternal = true
@@ -88,37 +101,50 @@ fun MainScreen(vm: MainViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(50)) { uris ->
         vm.upload(uris)
     }
+    val pickToUpload = {
+        vm.expectingExternal = true
+        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+    }
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(enabled = vm.stack.isNotEmpty()) { vm.back() }
     BackHandler(enabled = vm.stack.isEmpty() && vm.tab != Tab.Library) { vm.selectTab(Tab.Library) }
 
     Box(Modifier.fillMaxSize().background(p.background)) {
-        saveable.SaveableStateProvider(vm.tab.name + vm.zone) {
+        saveable.SaveableStateProvider(vm.tab.name + vm.zone + vm.settings.newestOnTop) {
             when (vm.tab) {
-                Tab.Library -> PhotoGrid(
-                    vm = vm,
-                    spec = AlbumSpec.LIBRARY,
-                    isRoot = true,
-                    onBack = null,
-                    onSelectingChanged = { vm.librarySelecting = it },
-                    onUploadClick = {
-                        vm.expectingExternal = true
-                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                    },
-                )
+                Tab.Library -> LibraryTab(vm, onUploadClick = pickToUpload)
                 Tab.Albums -> AlbumsTab(vm)
+                Tab.Search -> SearchTab(vm)
             }
         }
-
         if (!(vm.tab == Tab.Library && vm.librarySelecting)) {
             TabBar(vm, navBottom, Modifier.align(Alignment.BottomCenter))
         }
 
         vm.stack.forEachIndexed { i, route ->
+            val covered = i != vm.stack.lastIndex
             key(i, route) {
                 when (route) {
-                    is Route.Album -> PhotoGrid(vm, route.spec, isRoot = false, onBack = { vm.back() })
-                    is Route.Viewer -> ViewerScreen(vm, route.spec, route.index) { vm.back() }
+                    is Route.Grid -> {
+                        val list = vm.listByKey(route.key)
+                        if (list == null) LaunchedEffect(Unit) { vm.back() }
+                        else AlbumGrid(vm, list)
+                    }
+                    is Route.Viewer -> {
+                        val list = vm.listByKey(route.key)
+                        if (list == null) LaunchedEffect(Unit) { vm.back() }
+                        else ViewerScreen(vm, list, route.index, covered) { vm.back() }
+                    }
+                    is Route.Slideshow -> {
+                        val list = vm.listByKey(route.key)
+                        if (list == null) LaunchedEffect(Unit) { vm.back() }
+                        else SlideshowScreen(vm, list, route.index) { vm.back() }
+                    }
+                    is Route.Editor -> {
+                        val asset = vm.listByKey(route.key)?.get(route.index)
+                        if (asset == null) LaunchedEffect(Unit) { vm.back() }
+                        else EditorScreen(vm, asset) { vm.back() }
+                    }
                     Route.Settings -> SettingsScreen(vm) { vm.back() }
                     Route.AllAlbums -> AllAlbumsScreen(vm) { vm.back() }
                 }
@@ -138,6 +164,22 @@ fun MainScreen(vm: MainViewModel) {
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(10.dp))
                 Text(vm.uploadStatus ?: "", color = p.label, fontSize = 14.sp)
+            }
+        }
+
+        if (vm.offlineMode && vm.stack.isEmpty()) {
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = statusTop + 60.dp)
+                    .background(p.card, RoundedCornerShape(16.dp))
+                    .clickable { vm.retryStartup() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.CloudOff, null, tint = p.secondaryLabel, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Offline — tap to reconnect", color = p.label, fontSize = 13.sp)
             }
         }
 
@@ -168,9 +210,54 @@ fun MainScreen(vm: MainViewModel) {
     }
 }
 
+/** An album, smart album, shared album or search result, with its ••• menu. */
 @Composable
-private fun TabBar(vm: MainViewModel, navBottom: androidx.compose.ui.unit.Dp, modifier: Modifier) {
+private fun AlbumGrid(vm: MainViewModel, list: MediaList) {
+    val spec = list.spec
+    var menu by remember { mutableStateOf(false) }
+    val canKeepOffline = !vm.offlineMode && spec.kind != AlbumKind.Virtual &&
+        spec.kind != AlbumKind.Hidden && spec.kind != AlbumKind.Deleted && spec.kind != AlbumKind.Library
+    PhotoGrid(
+        vm = vm,
+        list = list,
+        isRoot = false,
+        onBack = { vm.back() },
+        headerActions = {
+            Box {
+                Pill(icon = Icons.Filled.MoreHoriz, onClick = { menu = true })
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Slideshow") },
+                        leadingIcon = { Icon(Icons.Outlined.Slideshow, null) },
+                        enabled = list.count > 0,
+                        onClick = { menu = false; vm.open(Route.Slideshow(list.key, 0)) },
+                    )
+                    if (canKeepOffline) {
+                        val kept = vm.isOffline(spec)
+                        DropdownMenuItem(
+                            text = { Text(if (kept) "Remove Offline Copy" else "Keep Offline") },
+                            leadingIcon = { Icon(if (kept) Icons.Outlined.CloudOff else Icons.Outlined.CloudDownload, null) },
+                            onClick = { menu = false; vm.setOffline(spec, !kept) },
+                        )
+                    }
+                    if (!vm.offlineMode) {
+                        DropdownMenuItem(
+                            text = { Text("Refresh") },
+                            leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
+                            onClick = { menu = false; list.refresh() },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+        },
+    )
+}
+
+@Composable
+private fun TabBar(vm: MainViewModel, navBottom: Dp, modifier: Modifier) {
     val p = LocalPalette.current
+    val labels = vm.settings.tabLabels
     Column(modifier.fillMaxWidth().background(p.bar)) {
         HorizontalDivider(thickness = 0.5.dp, color = p.separator)
         Row(
@@ -178,24 +265,25 @@ private fun TabBar(vm: MainViewModel, navBottom: androidx.compose.ui.unit.Dp, mo
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TabItem(Icons.Filled.PhotoLibrary, "Library", vm.tab == Tab.Library) { vm.selectTab(Tab.Library) }
-            TabItem(Icons.Filled.Collections, "Albums", vm.tab == Tab.Albums) { vm.selectTab(Tab.Albums) }
+            TabItem(Icons.Filled.PhotoLibrary, "Library", labels, vm.tab == Tab.Library) { vm.selectTab(Tab.Library) }
+            TabItem(Icons.Filled.Collections, "Albums", labels, vm.tab == Tab.Albums) { vm.selectTab(Tab.Albums) }
+            TabItem(Icons.Filled.Search, "Search", labels, vm.tab == Tab.Search) { vm.selectTab(Tab.Search) }
         }
         Spacer(Modifier.height(navBottom))
     }
 }
 
 @Composable
-private fun TabItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+private fun TabItem(icon: ImageVector, label: String, showLabel: Boolean, selected: Boolean, onClick: () -> Unit) {
     val p = LocalPalette.current
     val tint = if (selected) p.accent else p.secondaryLabel
     Column(
         Modifier
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            .padding(horizontal = 28.dp, vertical = 4.dp),
+            .padding(horizontal = 24.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, label, tint = tint, modifier = Modifier.size(26.dp))
-        Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Icon(icon, label, tint = tint, modifier = Modifier.size(if (showLabel) 26.dp else 30.dp))
+        if (showLabel) Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }

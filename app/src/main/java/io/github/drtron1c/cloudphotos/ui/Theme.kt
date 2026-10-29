@@ -5,9 +5,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import io.github.drtron1c.cloudphotos.settings.AppSettings
 
 /** iOS-flavoured system colours. */
 @Immutable
@@ -56,25 +58,34 @@ val DarkPalette = Palette(
 val LocalPalette = staticCompositionLocalOf { LightPalette }
 
 @Composable
-fun CloudPhotosTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val p = if (dark) DarkPalette else LightPalette
+fun isDarkTheme(mode: String): Boolean = when (mode) {
+    "light" -> false
+    "dark" -> true
+    else -> isSystemInDarkTheme()
+}
+
+@Composable
+fun CloudPhotosTheme(themeMode: String = "system", accentIndex: Int = 0, content: @Composable () -> Unit) {
+    val dark = isDarkTheme(themeMode)
+    val base = if (dark) DarkPalette else LightPalette
+    val accentArgb = AppSettings.ACCENTS.getOrNull(accentIndex)?.second
+    val p = if (accentArgb != null && accentIndex != 0) base.copy(accent = Color(accentArgb)) else base
     val scheme = if (dark) {
         darkColorScheme(
             primary = p.accent, onPrimary = Color.White, background = p.background, onBackground = p.label,
             surface = p.card, onSurface = p.label, surfaceVariant = Color(0xFF2C2C2E), onSurfaceVariant = p.secondaryLabel,
             error = p.destructive, surfaceContainerHigh = Color(0xFF2C2C2E), surfaceContainerLow = p.card,
-            surfaceContainer = p.card,
+            surfaceContainer = p.card, surfaceContainerHighest = Color(0xFF3A3A3C),
         )
     } else {
         lightColorScheme(
             primary = p.accent, onPrimary = Color.White, background = p.background, onBackground = p.label,
             surface = p.card, onSurface = p.label, surfaceVariant = Color(0xFFE5E5EA), onSurfaceVariant = p.secondaryLabel,
             error = p.destructive, surfaceContainerHigh = Color(0xFFF2F2F7), surfaceContainerLow = Color.White,
-            surfaceContainer = Color(0xFFF2F2F7),
+            surfaceContainer = Color(0xFFF2F2F7), surfaceContainerHighest = Color(0xFFE5E5EA),
         )
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalPalette provides p) {
+    CompositionLocalProvider(LocalPalette provides p) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }

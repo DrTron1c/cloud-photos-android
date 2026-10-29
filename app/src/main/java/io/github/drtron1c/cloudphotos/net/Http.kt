@@ -1,6 +1,12 @@
 package io.github.drtron1c.cloudphotos.net
 
+import android.content.SharedPreferences
+import io.github.drtron1c.cloudphotos.settings.Keys
 import kotlinx.coroutines.Dispatchers
+import okhttp3.Dns
+import okhttp3.dnsoverhttps.DnsOverHttps
+import java.net.InetAddress
+import java.net.UnknownHostException
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -55,8 +61,50 @@ class HttpException(val code: Int, message: String) : IOException(message)
 /** The iCloud session is no longer accepted; the caller should sign in again. */
 class SessionExpiredException(message: String = "Your iCloud session has expired") : IOException(message)
 
-fun buildHttpClient(cookieJar: PersistentCookieJar, authState: AuthState): OkHttpClient =
+/**
+ * Resolves host names over encrypted DNS (DNS-over-HTTPS) so the Wi-Fi / mobile network
+ * can't see which iCloud servers are being looked up. Provider is read from settings on
+ * every lookup, so changing it takes effect immediately. No silent fallback to plain DNS.
+ */
+class PrivateDns(private val prefs: SharedPreferences) : Dns {
+    private val bootstrap = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+    private val cache = HashMap<String, Dns>()
+
+    override fun lookup(hostname: String): List<InetAddress> {
+        val provider = prefs.getString(Keys.DNS, "cloudflare") ?: "cloudflare"
+        val dns = synchronized(cache) { cache.getOrPut(provider) { build(provider) } }
+        return try {
+            dns.lookup(hostname)
+        } catch (e: UnknownHostException) {
+            if (provider == "system") throw e
+            throw UnknownHostException(
+                "Couldn't look up $hostname over encrypted DNS ($provider). " +
+                    "If this network blocks it, change \"Encrypted DNS\" in privacy settings."
+            )
+        }
+    }
+
+    private fun doh(url: String, vararg ips: String): Dns = DnsOverHttps.Builder()
+        .client(bootstrap)
+        .url(url.toHttpUrl())
+        .bootstrapDnsHosts(ips.map { InetAddress.getByName(it) })
+        .includeIPv6(true)
+        .build()
+
+    private fun build(provider: String): Dns = when (provider) {
+        "system" -> Dns.SYSTEM
+        "quad9" -> doh("https://dns.quad9.net/dns-query", "9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9")
+        "google" -> doh("https://dns.google/dns-query", "8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844")
+        else -> doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001")
+    }
+}
+
+fun buildHttpClient(cookieJar: PersistentCookieJar, authState: AuthState, prefs: SharedPreferences): OkHttpClient =
     OkHttpClient.Builder()
+        .dns(PrivateDns(prefs))
         .cookieJar(cookieJar)
         .addInterceptor(Interceptor { chain ->
             val req = chain.request()
