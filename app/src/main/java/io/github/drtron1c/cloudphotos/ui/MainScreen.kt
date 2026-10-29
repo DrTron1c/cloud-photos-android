@@ -14,6 +14,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +50,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -114,6 +118,7 @@ fun AppRoot(vm: MainViewModel) {
 @Composable
 fun MainScreen(vm: MainViewModel) {
     val p = LocalPalette.current
+    val s = vm.settings
     val snackbar = remember { SnackbarHostState() }
     val saveable = rememberSaveableStateHolder()
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -126,130 +131,191 @@ fun MainScreen(vm: MainViewModel) {
         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
     }
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(vm.uploadRequest) { if (vm.uploadRequest > 0 && vm.canUpload) pickToUpload() }
     BackHandler(enabled = vm.stack.isNotEmpty()) { vm.back() }
     BackHandler(enabled = vm.stack.isEmpty() && vm.tab != Tab.Library) { vm.selectTab(Tab.Library) }
 
-    // Everything is the backdrop for the banners' glass; the tabs are the tab bar's backdrop.
-    GlassHost(Modifier.fillMaxSize().background(p.background), content = {
-        GlassHost(Modifier.fillMaxSize(), content = {
-            saveable.SaveableStateProvider(vm.tab.name + vm.zone + vm.settings.newestOnTop) {
-                when (vm.tab) {
-                    Tab.Library -> LibraryTab(vm, onUploadClick = pickToUpload)
-                    Tab.Albums -> AlbumsTab(vm)
-                    Tab.Search -> SearchTab(vm)
+    BoxWithConstraints(Modifier.fillMaxSize().dropToUpload(vm)) {
+        // Big screens (tablets, landscape foldables): a sidebar like iPad, and photos open next to the grid.
+        val wide = maxWidth >= 800.dp && s.sidebar
+        val firstFull = vm.stack.indexOfFirst { it.fullScreen }
+        val split = wide && s.splitViewer && maxWidth >= 900.dp && firstFull >= 0 && vm.stack[firstFull] is Route.Viewer
+        vm.splitActive = split
+        val sidebarW = if (wide && !split) SIDEBAR_WIDTH else 0.dp
+        val viewerW = if (split) maxWidth * 0.58f else 0.dp
+        val contentW = maxWidth - sidebarW - viewerW
+        val inContent = if (firstFull < 0) vm.stack.size else firstFull
+        val noTabBar = wide || split
+
+        // Everything is the backdrop for the banners' glass; the tabs are the tab bar's backdrop.
+        GlassHost(Modifier.fillMaxSize().background(p.background), content = {
+            Box(Modifier.fillMaxSize()) {
+                if (sidebarW > 0.dp) Sidebar(vm, Modifier.width(sidebarW).fillMaxHeight())
+                Box(Modifier.fillMaxSize().padding(start = sidebarW, end = viewerW)) {
+                    CompositionLocalProvider(LocalContentWidth provides contentW, LocalNoTabBar provides noTabBar) {
+                        GlassHost(Modifier.fillMaxSize(), content = {
+                            saveable.SaveableStateProvider(vm.tab.name + vm.zone + vm.settings.newestOnTop) {
+                                when (vm.tab) {
+                                    Tab.Library -> LibraryTab(vm, onUploadClick = pickToUpload)
+                                    Tab.Albums -> AlbumsTab(vm)
+                                    Tab.Search -> SearchTab(vm)
+                                }
+                            }
+                        }) {
+                            if (!noTabBar && !(vm.tab == Tab.Library && vm.librarySelecting)) {
+                                TabBar(vm, navBottom, Modifier.align(Alignment.BottomCenter))
+                            }
+                        }
+                        for (i in 0 until inContent) RouteView(vm, i, vm.stack[i], covered = i != vm.stack.lastIndex)
+                    }
                 }
+                if (split) {
+                    Box(Modifier.align(Alignment.CenterEnd).width(viewerW).fillMaxHeight().background(p.background)) {
+                        CompositionLocalProvider(LocalContentWidth provides viewerW, LocalNoTabBar provides true) {
+                            RouteView(vm, firstFull, vm.stack[firstFull], covered = firstFull != vm.stack.lastIndex, inSplit = true)
+                        }
+                    }
+                }
+                val overlayFrom = if (split) firstFull + 1 else inContent
+                for (i in overlayFrom until vm.stack.size) RouteView(vm, i, vm.stack[i], covered = i != vm.stack.lastIndex)
             }
         }) {
-            if (!(vm.tab == Tab.Library && vm.librarySelecting)) {
-                TabBar(vm, navBottom, Modifier.align(Alignment.BottomCenter))
-            }
-        }
-
-        vm.stack.forEachIndexed { i, route ->
-            val covered = i != vm.stack.lastIndex
-            key(i, route) {
-                when (route) {
-                    is Route.Grid -> {
-                        val list = vm.listByKey(route.key)
-                        if (list == null) LaunchedEffect(Unit) { vm.back() }
-                        else AlbumGrid(vm, list)
-                    }
-                    is Route.Viewer -> {
-                        val list = vm.listByKey(route.key)
-                        if (list == null) LaunchedEffect(Unit) { vm.back() }
-                        else ViewerScreen(vm, list, route.index, covered) { vm.back() }
-                    }
-                    is Route.Slideshow -> {
-                        val list = vm.listByKey(route.key)
-                        if (list == null) LaunchedEffect(Unit) { vm.back() }
-                        else SlideshowScreen(vm, list, route.index) { vm.back() }
-                    }
-                    is Route.Editor -> {
-                        val asset = vm.listByKey(route.key)?.get(route.index)
-                        if (asset == null) LaunchedEffect(Unit) { vm.back() }
-                        else EditorScreen(vm, asset) { vm.back() }
-                    }
-                    Route.Settings -> SettingsScreen(vm) { vm.back() }
-                    Route.AllAlbums -> AllAlbumsScreen(vm) { vm.back() }
-                    Route.AppIdentity -> IdentityScreen(vm) { vm.back() }
-                    Route.Vpn -> VpnScreen(vm) { vm.back() }
+            // Liquid Glass banners at the top: update available / what's new / VPN.
+            Column(
+                Modifier.align(Alignment.TopCenter).padding(top = statusTop + 6.dp).fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                UpdateBanner(vm.updates)
+                if (vm.whatsNew.isNotEmpty()) {
+                    WhatsNewBanner(vm.whatsNew, io.github.drtron1c.cloudphotos.BuildConfig.VERSION_CODE, onDismiss = { vm.dismissWhatsNew() })
                 }
             }
-        }
-    }) {
-        // Liquid Glass banners at the top: update available / what's new / VPN.
-        Column(
-            Modifier.align(Alignment.TopCenter).padding(top = statusTop + 6.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            UpdateBanner(vm.updates)
-            if (vm.whatsNew.isNotEmpty()) {
-                WhatsNewBanner(vm.whatsNew, io.github.drtron1c.cloudphotos.BuildConfig.VERSION_CODE, onDismiss = { vm.dismissWhatsNew() })
-            }
-        }
 
-        AnimatedVisibility(
-            visible = vm.uploadStatus != null,
-            enter = slideInVertically() + fadeIn(),
-            exit = slideOutVertically() + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = statusTop + 64.dp),
-        ) {
-            Row(
-                Modifier.background(p.card, RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            AnimatedVisibility(
+                visible = vm.uploadStatus != null,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = statusTop + 64.dp),
             ) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-                Text(vm.uploadStatus ?: "", color = p.label, fontSize = 14.sp)
-            }
-        }
-
-        if (vm.offlineMode && vm.stack.isEmpty()) {
-            Row(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = statusTop + 60.dp)
-                    .background(p.card, RoundedCornerShape(16.dp))
-                    .clickable { vm.retryStartup() }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.CloudOff, null, tint = p.secondaryLabel, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Offline — tap to reconnect", color = p.label, fontSize = 13.sp)
-            }
-        }
-
-        SnackbarHost(
-            snackbar,
-            Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + 20.dp),
-        )
-
-        val busy = vm.busy
-        if (busy != null) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    Modifier.background(p.card, RoundedCornerShape(16.dp)).padding(horizontal = 28.dp, vertical = 22.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Row(
+                    Modifier.background(p.card, RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 2.5.dp)
-                    Spacer(Modifier.height(12.dp))
-                    Text(busy, color = p.label, fontSize = 15.sp)
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(vm.uploadStatus ?: "", color = p.label, fontSize = 14.sp)
                 }
             }
+
+            if (vm.offlineMode && vm.stack.isEmpty()) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = statusTop + 60.dp)
+                        .background(p.card, RoundedCornerShape(16.dp))
+                        .clickable { vm.retryStartup() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.CloudOff, null, tint = p.secondaryLabel, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Offline — tap to reconnect", color = p.label, fontSize = 13.sp)
+                }
+            }
+
+            SnackbarHost(
+                snackbar,
+                Modifier.align(Alignment.BottomCenter).padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + 20.dp),
+            )
+
+            if (vm.dropHover) {
+                Box(
+                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).padding(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Drop to add to iCloud Photos",
+                        color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.background(p.accent, RoundedCornerShape(18.dp)).padding(horizontal = 24.dp, vertical = 14.dp),
+                    )
+                }
+            }
+
+            val busy = vm.busy
+            if (busy != null) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        Modifier.background(p.card, RoundedCornerShape(16.dp)).padding(horizontal = 28.dp, vertical = 22.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 2.5.dp)
+                        Spacer(Modifier.height(12.dp))
+                        Text(busy, color = p.label, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+    }
+    if (vm.showShortcuts) ShortcutsDialog { vm.showShortcuts = false }
+}
+
+/** One screen of the navigation stack. */
+@Composable
+private fun RouteView(vm: MainViewModel, i: Int, route: Route, covered: Boolean, inSplit: Boolean = false) {
+    key(i, route) {
+        when (route) {
+            is Route.Grid -> {
+                val list = vm.listByKey(route.key)
+                if (list == null) LaunchedEffect(Unit) { vm.back() }
+                else AlbumGrid(vm, list, level = i + 1, covered = covered)
+            }
+            is Route.Viewer -> {
+                val list = vm.listByKey(route.key)
+                if (list == null) LaunchedEffect(Unit) { vm.back() }
+                else ViewerScreen(vm, list, route.index, covered, level = i + 1, inSplit = inSplit) { vm.back() }
+            }
+            is Route.Slideshow -> {
+                val list = vm.listByKey(route.key)
+                if (list == null) LaunchedEffect(Unit) { vm.back() }
+                else SlideshowScreen(vm, list, route.index, level = i + 1) { vm.back() }
+            }
+            is Route.Editor -> {
+                val asset = vm.listByKey(route.key)?.get(route.index)
+                if (asset == null) LaunchedEffect(Unit) { vm.back() }
+                else EditorScreen(vm, asset) { vm.back() }
+            }
+            is Route.Trim -> {
+                val asset = vm.listByKey(route.key)?.get(route.index)
+                if (asset == null) LaunchedEffect(Unit) { vm.back() }
+                else TrimScreen(vm, asset) { vm.back() }
+            }
+            is Route.MemoryPlayer -> {
+                val memory = vm.memoryById(route.id)
+                if (memory == null) LaunchedEffect(Unit) { vm.back() }
+                else MemoryPlayerScreen(vm, memory, level = i + 1) { vm.back() }
+            }
+            Route.Settings -> SettingsScreen(vm) { vm.back() }
+            Route.AllAlbums -> AllAlbumsScreen(vm) { vm.back() }
+            Route.AppIdentity -> IdentityScreen(vm) { vm.back() }
+            Route.Vpn -> VpnScreen(vm) { vm.back() }
+            Route.Memories -> MemoriesScreen(vm) { vm.back() }
+            Route.People -> PeopleScreen(vm) { vm.back() }
+            is Route.Person -> PersonScreen(vm, route.id, level = i + 1, covered = covered) { vm.back() }
+            Route.Places -> PlacesScreen(vm) { vm.back() }
+            Route.Similar -> SimilarScreen(vm) { vm.back() }
         }
     }
 }
 
 /** An album, smart album, shared album or search result, with its ••• menu. */
 @Composable
-private fun AlbumGrid(vm: MainViewModel, list: MediaList) {
+private fun AlbumGrid(vm: MainViewModel, list: MediaList, level: Int, covered: Boolean) {
     val spec = list.spec
     var menu by remember { mutableStateOf(false) }
     val canKeepOffline = !vm.offlineMode && spec.kind != AlbumKind.Virtual &&
@@ -259,6 +325,8 @@ private fun AlbumGrid(vm: MainViewModel, list: MediaList) {
         list = list,
         isRoot = false,
         onBack = { vm.back() },
+        keyLevel = level,
+        keysEnabled = !covered,
         headerActions = {
             Box {
                 Pill(icon = Icons.Filled.MoreHoriz, onClick = { menu = true })
@@ -269,6 +337,13 @@ private fun AlbumGrid(vm: MainViewModel, list: MediaList) {
                         enabled = list.count > 0,
                         onClick = { menu = false; vm.open(Route.Slideshow(list.key, 0)) },
                     )
+                    if (!vm.offlineMode && list.count > 0) {
+                        DropdownMenuItem(
+                            text = { Text("Export All…") },
+                            leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
+                            onClick = { menu = false; vm.exportAll(list) },
+                        )
+                    }
                     if (canKeepOffline) {
                         val kept = vm.isOffline(spec)
                         DropdownMenuItem(

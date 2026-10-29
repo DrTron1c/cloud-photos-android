@@ -35,9 +35,11 @@ APPT=app/build/outputs/apk/releaseTest/app-releaseTest.apk
 # Key rotation: old key → rotated key installs; the retired key is then refused.
 if [ -f rotation/1-old.apk ]; then
   {
-    echo "1 old:      $(adb install rotation/1-old.apk 2>&1 | tail -1)"
-    echo "2 rotated:  $(adb install -r rotation/2-rotated.apk 2>&1 | tail -1)"
-    echo "3 old key:  $(adb install -r rotation/3-old-again.apk 2>&1 | tail -1)"
+    last() { grep -v '^[[:space:]]*$' | tail -1; }
+    echo "1 old:      $(adb install rotation/1-old.apk 2>&1 | last)"
+    echo "2 rotated:  $(adb install -r rotation/2-rotated.apk 2>&1 | last)"
+    echo "3 old key:  $(adb install -r rotation/3-old-again.apk 2>&1 | last)"
+    echo "signer now: $(adb shell dumpsys package io.github.drtron1c.cloudphotos.launcher | grep -iE 'signatures|pastSigs' | head -3 | tr -s ' ' | tr '\n' ' ')"
   } > $OUT/rotation.txt
   adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
   cat $OUT/rotation.txt

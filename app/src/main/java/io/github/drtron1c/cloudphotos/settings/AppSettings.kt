@@ -59,6 +59,19 @@ object Keys {
     const val VPN_FREE_ONLY = "vpn_free_only"
     const val VPN_WHOLE_DEVICE = "vpn_whole_device"
     const val VPN_REQUIRE = "vpn_require"
+    const val HIGH_REFRESH = "high_refresh"
+    const val SIDEBAR = "sidebar"
+    const val SPLIT_VIEWER = "split_viewer"
+    const val SHARE_COMPATIBLE = "share_compatible"
+    const val AI_PEOPLE = "ai_people"
+    const val AI_TEXT = "ai_text"
+    const val MEMORIES_NOTIFY = "memories_notify"
+    const val MEMORIES_LAST_NOTIFIED = "memories_last_notified"
+    const val MEMORY_MUSIC = "memory_music"
+    const val MEMORY_MUSIC_URI = "memory_music_uri"
+    const val MEMORY_MUSIC_NAME = "memory_music_name"
+    const val PLACES_MAP = "places_map"
+    const val PEOPLE_NAMES = "people_names"
 }
 
 /**
@@ -168,6 +181,29 @@ class AppSettings(private val prefs: SharedPreferences) {
     var vpnWholeDevice by bool(Keys.VPN_WHOLE_DEVICE, false)
     /** Don't contact iCloud at all unless the VPN is connected. */
     var vpnRequire by bool(Keys.VPN_REQUIRE, false)
+
+    /** Run the screen at its highest refresh rate (e.g. 120 / 144 Hz). */
+    var highRefresh by bool(Keys.HIGH_REFRESH, true)
+    /** Big screens: a sidebar instead of the tab bar. */
+    var sidebar by bool(Keys.SIDEBAR, true)
+    /** Big screens: open photos next to the grid instead of over it. */
+    var splitViewer by bool(Keys.SPLIT_VIEWER, true)
+    /** Share HEIC photos as JPEG ("Most Compatible"). */
+    var shareCompatible by bool(Keys.SHARE_COMPATIBLE, false)
+
+    /** On-device AI: find faces and group them into People. */
+    var aiPeople by bool(Keys.AI_PEOPLE, false)
+    /** On-device AI: read the text in photos (search it, copy it). */
+    var aiText by bool(Keys.AI_TEXT, false)
+
+    /** Daily "On This Day" notification. */
+    var memoriesNotify by bool(Keys.MEMORIES_NOTIFY, false)
+    /** Memory soundtrack: "gentle", "bright", "dreamy", "custom" or "none". */
+    var memoryMusic by str(Keys.MEMORY_MUSIC, "gentle")
+    var memoryMusicUri by str(Keys.MEMORY_MUSIC_URI, "")
+    var memoryMusicName by str(Keys.MEMORY_MUSIC_NAME, "")
+    /** Places: show the OpenStreetMap map (loads map pictures from openstreetmap.org). */
+    var placesMap by bool(Keys.PLACES_MAP, false)
 
     fun raw(): SharedPreferences = prefs
 

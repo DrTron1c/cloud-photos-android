@@ -2,6 +2,7 @@ package io.github.drtron1c.cloudphotos.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.view.KeyEvent
 import android.view.TextureView
 import android.view.ViewGroup
 import androidx.annotation.OptIn
@@ -14,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +33,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +47,12 @@ import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
@@ -81,10 +92,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -113,15 +128,23 @@ import io.github.drtron1c.cloudphotos.photos.Asset
 import io.github.drtron1c.cloudphotos.photos.MediaList
 import io.github.drtron1c.cloudphotos.photos.Version
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import me.saket.telephoto.flick.FlickToDismiss
 import me.saket.telephoto.flick.FlickToDismissState
 import me.saket.telephoto.flick.rememberFlickToDismissState
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
+import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
 import okhttp3.OkHttpClient
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/** How far photos and videos zoom (× the fitted size). Full-resolution detail is loaded as you go in. */
+const val MAX_ZOOM = 16f
 
 /** Plays local (offline) files and iCloud links through the same encrypted-DNS client. */
 @OptIn(UnstableApi::class)
@@ -138,7 +161,15 @@ fun newPlayer(context: android.content.Context, http: OkHttpClient, uri: Uri, lo
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: Boolean = false, onClose: () -> Unit) {
+fun ViewerScreen(
+    vm: MainViewModel,
+    list: MediaList,
+    startIndex: Int,
+    covered: Boolean = false,
+    level: Int = 1,
+    inSplit: Boolean = false,
+    onClose: () -> Unit,
+) {
     val p = LocalPalette.current
     val s = vm.settings
     val context = LocalContext.current
@@ -151,6 +182,11 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
     var menu by remember { mutableStateOf(false) }
     var addToAlbum by remember { mutableStateOf<Asset?>(null) }
     var liveTrigger by remember { mutableIntStateOf(0) }
+    var textSheet by remember { mutableStateOf<List<String>?>(null) }
+    // Keyboard: space / P go to the video on screen.
+    var videoKey by remember { mutableStateOf<((Int) -> Boolean)?>(null) }
+    val focus = LocalFocusManager.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val flick = rememberFlickToDismissState(dismissThresholdRatio = 0.12f, rotateOnDrag = false)
     val close by rememberUpdatedState(onClose)
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -158,6 +194,8 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
     val online = !vm.offlineMode
     val editable = spec.editable && online
 
+    // A hardware keyboard drives the viewer, not a search field left focused underneath.
+    LaunchedEffect(Unit) { runCatching { focus.clearFocus(force = true) } }
     LaunchedEffect(flick.gestureState) {
         if (flick.gestureState is FlickToDismissState.GestureState.Dismissed) close()
     }
@@ -169,7 +207,48 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
     LaunchedEffect(pager.settledPage, list[pager.settledPage]?.id) {
         val a = list[pager.settledPage] ?: return@LaunchedEffect
         if (spec.editable) vm.noteViewed(a)
+        if (inSplit) vm.viewingId = a.id
         if (a.isLive && s.livePhotoAutoplay) liveTrigger++
+    }
+    DisposableEffect(inSplit) { onDispose { if (inSplit) vm.viewingId = null } }
+
+    fun readText(a: Asset) {
+        vm.readText(a) { lines -> textSheet = lines }
+    }
+
+    KeyShortcuts(vm, level, enabled = !covered && !vm.inPip) { e ->
+        val a = list[pager.currentPage]
+        val code = e.keyCode
+        when {
+            code == KeyEvent.KEYCODE_ESCAPE -> { onClose(); true }
+            code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_PAGE_DOWN -> {
+                if (pager.currentPage < count - 1) scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }; true
+            }
+            code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_PAGE_UP -> {
+                if (pager.currentPage > 0) scope.launch { pager.animateScrollToPage(pager.currentPage - 1) }; true
+            }
+            code == KeyEvent.KEYCODE_MOVE_HOME -> { scope.launch { pager.scrollToPage(0) }; true }
+            code == KeyEvent.KEYCODE_MOVE_END -> { scope.launch { pager.scrollToPage((count - 1).coerceAtLeast(0)) }; true }
+            a == null -> false
+            e.ctrl && code == KeyEvent.KEYCODE_C -> { vm.copyToClipboard(a); true }
+            e.ctrl && e.isShiftPressed && code == KeyEvent.KEYCODE_S -> { vm.share(listOf(a)) { context.startActivity(it) }; true }
+            e.ctrl && code == KeyEvent.KEYCODE_S -> { if (online) vm.saveToDevice(listOf(a)); true }
+            e.ctrl && code == KeyEvent.KEYCODE_ENTER -> { vm.open(Route.Slideshow(list.key, pager.currentPage)); true }
+            !e.plain -> false
+            code == KeyEvent.KEYCODE_SPACE || code == KeyEvent.KEYCODE_P || code == KeyEvent.KEYCODE_M -> {
+                if (a.isVideo) videoKey?.invoke(code) ?: false
+                else if (code == KeyEvent.KEYCODE_SPACE) { if (a.isLive) liveTrigger++ else chrome = !chrome; true } else false
+            }
+            code == KeyEvent.KEYCODE_F || code == KeyEvent.KEYCODE_PERIOD -> { if (editable) vm.toggleFavorite(a); true }
+            code == KeyEvent.KEYCODE_I -> { showInfo = !showInfo; true }
+            code == KeyEvent.KEYCODE_E -> { if (editable && !a.isVideo) vm.open(Route.Editor(list.key, pager.currentPage)); true }
+            code == KeyEvent.KEYCODE_T -> { if (!a.isVideo) readText(a); true }
+            code == KeyEvent.KEYCODE_L -> { if (a.isLive) liveTrigger++; true }
+            code == KeyEvent.KEYCODE_DEL || code == KeyEvent.KEYCODE_FORWARD_DEL -> {
+                if (editable && spec.kind != AlbumKind.Deleted) { if (s.confirmDelete) confirmDelete = true else vm.delete(listOf(a)) }; true
+            }
+            else -> false
+        }
     }
 
     // Tap to hide bars → true full screen, like iPhone.
@@ -190,7 +269,8 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
         }
     }
 
-    val baseBg by animateColorAsState(if (chrome) p.background else Color.Black, label = "viewerBg")
+    val showChrome = chrome && !vm.inPip
+    val baseBg by animateColorAsState(if (showChrome) p.background else Color.Black, label = "viewerBg")
     val fade = 1f - (flick.offsetFraction * 1.6f).coerceIn(0f, 1f)
     val dragging = flick.gestureState !is FlickToDismissState.GestureState.Idle
 
@@ -202,6 +282,7 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
         FlickToDismiss(state = flick, modifier = Modifier.fillMaxSize().glassSource(viewerGlass)) {
             HorizontalPager(
                 state = pager,
+                userScrollEnabled = !vm.inPip,
                 beyondViewportPageCount = 1,
                 pageSpacing = 16.dp,
                 key = { it },
@@ -217,8 +298,11 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                         vm = vm,
                         asset = asset,
                         active = pager.settledPage == page && !covered,
-                        chrome = chrome && !dragging,
+                        chrome = showChrome && !dragging,
                         controlsBottom = navBottom + 56.dp,
+                        editable = editable,
+                        onTrim = { vm.open(Route.Trim(list.key, page)) },
+                        onKeyTarget = { if (pager.settledPage == page) videoKey = it },
                         onTap = { chrome = !chrome },
                     )
                     else -> PhotoPage(
@@ -226,7 +310,11 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                         asset = asset,
                         liveTrigger = if (pager.currentPage == page) liveTrigger else 0,
                         onTap = { chrome = !chrome },
-                        onLongPress = { if (asset.isLive) liveTrigger++ },
+                        onLongPress = {
+                            // Side by side with another app: long-press drags the photo into it.
+                            if (vm.canDragOut(context)) vm.startDragOut(view, asset)
+                            else if (asset.isLive) liveTrigger++
+                        },
                     )
                 }
             }
@@ -236,7 +324,7 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
 
         // Top bar
         AnimatedVisibility(
-            visible = chrome && !dragging,
+            visible = showChrome && !dragging,
             enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
@@ -254,6 +342,11 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                         Text(formatDay(current?.date ?: 0), color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(formatTime(current?.date ?: 0), color = p.secondaryLabel, fontSize = 12.sp)
                     }
+                    if (current != null && !current.isVideo && vm.settings.aiText) {
+                        IconButton(onClick = { readText(current) }) {
+                            Icon(Icons.Outlined.TextFields, "Text in photo", tint = p.accent)
+                        }
+                    }
                     if (current != null && !current.isVideo && editable) {
                         TextButton(onClick = { vm.open(Route.Editor(list.key, pager.currentPage)) }) { Text("Edit", fontSize = 16.sp) }
                     }
@@ -268,6 +361,18 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                                     leadingIcon = { Icon(Icons.Outlined.Slideshow, null) },
                                     onClick = { menu = false; vm.open(Route.Slideshow(list.key, pager.currentPage)) },
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("Copy") },
+                                    leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
+                                    onClick = { menu = false; vm.copyToClipboard(current) },
+                                )
+                                if (!current.isVideo) {
+                                    DropdownMenuItem(
+                                        text = { Text("Text in Photo") },
+                                        leadingIcon = { Icon(Icons.Outlined.TextFields, null) },
+                                        onClick = { menu = false; readText(current) },
+                                    )
+                                }
                                 if (online) {
                                     DropdownMenuItem(
                                         text = { Text("Save to Device") },
@@ -336,7 +441,7 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
 
         // Bottom toolbar
         AnimatedVisibility(
-            visible = chrome && !dragging,
+            visible = showChrome && !dragging,
             enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
@@ -413,6 +518,41 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
     addToAlbum?.let { a ->
         AddToAlbumDialog(vm, listOf(a), onDismiss = { addToAlbum = null }, onDone = { addToAlbum = null })
     }
+    textSheet?.let { lines ->
+        ModalBottomSheet(onDismissRequest = { textSheet = null }, containerColor = p.card) {
+            TextInPhotoSheet(vm, lines)
+        }
+    }
+}
+
+/** Live Text: the words found in the photo, selectable, with Copy All. */
+@Composable
+private fun TextInPhotoSheet(vm: MainViewModel, lines: List<String>) {
+    val p = LocalPalette.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 28.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Text in Photo", color = p.label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            if (lines.isNotEmpty()) {
+                TextButton(onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(lines.joinToString("\n")))
+                    vm.toast("Text copied")
+                }) { Text("Copy All") }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (lines.isEmpty()) {
+            Text("No text found in this photo.", color = p.secondaryLabel, fontSize = 15.sp)
+        } else {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    for (line in lines) Text(line, color = p.label, fontSize = 16.sp, modifier = Modifier.padding(vertical = 3.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Long-press to select part of it. Read on this device.", color = p.secondaryLabel, fontSize = 12.sp)
+        }
+    }
 }
 
 @Composable
@@ -436,10 +576,13 @@ private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: 
                 .placeholderMemoryCacheKey(asset.thumbnail?.checksum)
                 .build()
         }
+        // Zoom far in; past the screen's resolution the full-size original is loaded in tiles.
+        val zoom = rememberZoomableImageState(rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM)))
         ZoomableAsyncImage(
             model = request,
             contentDescription = asset.filename,
             imageLoader = vm.imageLoader,
+            state = zoom,
             modifier = Modifier.fillMaxSize(),
             onClick = { onTap() },
             onLongClick = { onLongPress() },
@@ -495,6 +638,9 @@ private fun VideoPage(
     active: Boolean,
     chrome: Boolean,
     controlsBottom: Dp,
+    editable: Boolean,
+    onTrim: () -> Unit,
+    onKeyTarget: (((Int) -> Boolean)?) -> Unit,
     onTap: () -> Unit,
 ) {
     val p = LocalPalette.current
@@ -550,19 +696,81 @@ private fun VideoPage(
                     player.release()
                 }
             }
+            // Picture-in-picture while it plays; keyboard space / P / M.
+            var playingNow by remember(asset.id) { mutableStateOf(false) }
+            LaunchedEffect(player) {
+                while (true) {
+                    playingNow = player.isPlaying
+                    delay(300)
+                }
+            }
+            LaunchedEffect(playingNow, videoSize) {
+                vm.pipCandidate(playingNow, videoSize.width.roundToInt(), videoSize.height.roundToInt())
+            }
+            DisposableEffect(asset.id) {
+                onKeyTarget { code ->
+                    when (code) {
+                        KeyEvent.KEYCODE_SPACE -> {
+                            if (player.playbackState == Player.STATE_ENDED) { player.seekTo(0); player.playWhenReady = true }
+                            else player.playWhenReady = !player.playWhenReady
+                            true
+                        }
+                        KeyEvent.KEYCODE_P -> { vm.enterPip(); true }
+                        KeyEvent.KEYCODE_M -> { player.volume = if (player.volume > 0f) 0f else 1f; true }
+                        else -> false
+                    }
+                }
+                onDispose {
+                    onKeyTarget(null)
+                    vm.pipCandidate(false, 0, 0)
+                }
+            }
             // Pinch / double-tap to zoom the playing video, same gestures as photos.
-            val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 6f))
+            val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
             LaunchedEffect(videoSize) {
                 zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(videoSize))
             }
+            var texture by remember(asset.id) { mutableStateOf<TextureView?>(null) }
             Box(Modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() })) {
-                // A TextureView (unlike PlayerView's default SurfaceView) can be scaled and moved by Compose.
-                AndroidView(
-                    factory = { ctx -> TextureView(ctx).also { player.setVideoTextureView(it) } },
-                    modifier = Modifier.align(Alignment.Center).aspectRatio(videoSize.width / videoSize.height),
-                )
+                // The TextureView is laid out at the video's own resolution and scaled down to fit,
+                // so zooming in shows the real pixels instead of a blown-up screen-sized copy.
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val longest = max(videoSize.width, videoSize.height).coerceAtLeast(1f)
+                    val cap = if (longest > 4096f) 4096f / longest else 1f
+                    val nativeW = (videoSize.width * cap).roundToInt().coerceAtLeast(1)
+                    val nativeH = (videoSize.height * cap).roundToInt().coerceAtLeast(1)
+                    val boxW = constraints.maxWidth.toFloat()
+                    val boxH = constraints.maxHeight.toFloat()
+                    val fit = min(boxW / nativeW, boxH / nativeH)
+                    AndroidView(
+                        factory = { ctx -> TextureView(ctx).also { player.setVideoTextureView(it); texture = it } },
+                        modifier = Modifier.align(Alignment.Center).layout { measurable, _ ->
+                            val placeable = measurable.measure(Constraints.fixed(nativeW, nativeH))
+                            val w = (nativeW * fit).roundToInt()
+                            val h = (nativeH * fit).roundToInt()
+                            layout(w, h) {
+                                placeable.placeWithLayer((w - nativeW) / 2, (h - nativeH) / 2) {
+                                    scaleX = fit
+                                    scaleY = fit
+                                }
+                            }
+                        },
+                    )
+                }
             }
-            VideoControls(player, visible = chrome, startMuted = s.startMuted, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp))
+            VideoControls(
+                vm = vm,
+                player = player,
+                visible = chrome,
+                startMuted = s.startMuted,
+                canTrim = editable && vm.canUpload,
+                onTrim = onTrim,
+                onSaveFrame = { toLibrary ->
+                    val bmp = texture?.bitmap
+                    if (bmp == null) vm.toast("The video isn't showing yet") else vm.saveFrame(asset, bmp, player.currentPosition, toLibrary)
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp),
+            )
         } else {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })
             Box(
@@ -575,8 +783,24 @@ private fun VideoPage(
     }
 }
 
+private val SPEEDS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+
+private fun speedLabel(x: Float) = (if (x == x.toInt().toFloat()) x.toInt().toString() else x.toString().trimEnd('0')) + "×"
+
 @Composable
-private fun VideoControls(player: ExoPlayer, visible: Boolean, startMuted: Boolean, modifier: Modifier) {
+private fun VideoControls(
+    vm: MainViewModel,
+    player: ExoPlayer,
+    visible: Boolean,
+    startMuted: Boolean,
+    canTrim: Boolean,
+    onTrim: () -> Unit,
+    onSaveFrame: (toLibrary: Boolean) -> Unit,
+    modifier: Modifier,
+) {
+    var speed by remember { mutableFloatStateOf(1f) }
+    var speedMenu by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(true) }
@@ -630,8 +854,50 @@ private fun VideoControls(player: ExoPlayer, visible: Boolean, startMuted: Boole
                 )
                 Text(formatDuration(duration / 1000.0).ifEmpty { "0:00" }, color = Color.White, fontSize = 12.sp,
                     modifier = Modifier.width(44.dp), textAlign = TextAlign.Center)
+                Box {
+                    TextButton(onClick = { speedMenu = true }) {
+                        Text(speedLabel(speed), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
+                        for (x in SPEEDS) {
+                            DropdownMenuItem(
+                                text = { Text((if (x == speed) "✓  " else "     ") + speedLabel(x)) },
+                                onClick = { speedMenu = false; speed = x; player.setPlaybackSpeed(x) },
+                            )
+                        }
+                    }
+                }
                 IconButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f }) {
                     Icon(if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, "Mute", tint = Color.White)
+                }
+                Box {
+                    IconButton(onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, "More", tint = Color.White) }
+                    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Picture in Picture") },
+                            leadingIcon = { Icon(Icons.Outlined.PictureInPictureAlt, null) },
+                            onClick = { more = false; player.playWhenReady = true; vm.enterPip() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Save Frame to Device") },
+                            leadingIcon = { Icon(Icons.Outlined.PhotoCamera, null) },
+                            onClick = { more = false; onSaveFrame(false) },
+                        )
+                        if (vm.canUpload) {
+                            DropdownMenuItem(
+                                text = { Text("Save Frame to Library") },
+                                leadingIcon = { Icon(Icons.Outlined.PhotoCamera, null) },
+                                onClick = { more = false; onSaveFrame(true) },
+                            )
+                        }
+                        if (canTrim) {
+                            DropdownMenuItem(
+                                text = { Text("Trim…") },
+                                leadingIcon = { Icon(Icons.Outlined.ContentCut, null) },
+                                onClick = { more = false; player.playWhenReady = false; onTrim() },
+                            )
+                        }
+                    }
                 }
             }
         }

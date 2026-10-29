@@ -1,10 +1,18 @@
 package io.github.drtron1c.cloudphotos.ui
 
 import android.app.ActivityManager
+import android.app.PictureInPictureParams
+import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
+import android.view.KeyEvent
+import android.view.KeyboardShortcutGroup
+import android.view.Menu
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,13 +23,21 @@ import androidx.fragment.app.FragmentActivity
 import io.github.drtron1c.cloudphotos.identity.CustomLauncher
 import io.github.drtron1c.cloudphotos.identity.IconArt
 
-class MainActivity : FragmentActivity() {
+class MainActivity : FragmentActivity(), PipHost {
+    companion object {
+        /** Intent extra: what to open ("search", "favourites", "memories", "onthisday", "places", "upload", "vpn"). */
+        const val EXTRA_OPEN = "io.github.drtron1c.cloudphotos.OPEN"
+    }
+
     private val vm: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         applyRecentsPrivacy(vm.settings.hideInRecents)
+        applyRefreshRate(vm.settings.highRefresh)
+        vm.pipHost = java.lang.ref.WeakReference(this)
+        handleLaunchIntent(intent)
         setContent {
             val s = vm.settings
             val dark = isDarkTheme(s.themeMode)
@@ -33,10 +49,94 @@ class MainActivity : FragmentActivity() {
             }
             LaunchedEffect(s.hideInRecents) { applyRecentsPrivacy(s.hideInRecents) }
             LaunchedEffect(s.customName, vm.identityVersion) { applyTaskIdentity(s.customName.trim()) }
+            LaunchedEffect(s.highRefresh) { applyRefreshRate(s.highRefresh) }
             CloudPhotosTheme(themeMode = s.themeMode, accentIndex = s.accent) {
                 CompositionLocalProvider(LocalGlassEnabled provides (s.liquidGlass && glassSupported())) { AppRoot(vm) }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    /** App shortcuts (long-press the icon), the On This Day notification and the Quick Settings tile. */
+    private fun handleLaunchIntent(intent: Intent?) {
+        val target = intent?.getStringExtra(EXTRA_OPEN) ?: return
+        intent.removeExtra(EXTRA_OPEN)
+        vm.openFromOutside(target)
+    }
+
+    /** Smooth motion: ask for the screen's fastest refresh rate (e.g. 120 or 144 Hz) at the same resolution. */
+    private fun applyRefreshRate(high: Boolean) {
+        val d = display ?: return
+        val current = d.mode
+        val best = d.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+            .maxByOrNull { it.refreshRate }
+        val lp = window.attributes
+        lp.preferredDisplayModeId = if (high && best != null) best.modeId else 0
+        window.attributes = lp
+    }
+
+    // ---------- hardware keyboard ----------
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && !vm.inPip) {
+            val typing = getSystemService(InputMethodManager::class.java)?.isAcceptingText == true
+            if (vm.handleKey(event, typing)) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    /** The list Android shows for Meta+/ (or Ctrl+/ in some launchers). */
+    override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {
+        data.addAll(systemShortcutGroups())
+    }
+
+    // ---------- picture-in-picture (videos) ----------
+
+    private var pipParams: PictureInPictureParams? = null
+
+    /** A video is playing ([w]×[h]): leaving the app shrinks it into a floating window. */
+    override fun setPipCandidate(playing: Boolean, w: Int, h: Int) {
+        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        val params = if (playing) {
+            val ratio = if (w > 0 && h > 0) Rational(w, h) else Rational(16, 9)
+            val clamped = when {
+                ratio.toFloat() > 2.39f -> Rational(239, 100)
+                ratio.toFloat() < 1 / 2.39f -> Rational(100, 239)
+                else -> ratio
+            }
+            PictureInPictureParams.Builder().setAspectRatio(clamped).apply {
+                if (Build.VERSION.SDK_INT >= 31) setAutoEnterEnabled(true).setSeamlessResizeEnabled(true)
+            }.build()
+        } else null
+        pipParams = params
+        runCatching {
+            setPictureInPictureParams(
+                params ?: PictureInPictureParams.Builder().apply { if (Build.VERSION.SDK_INT >= 31) setAutoEnterEnabled(false) }.build()
+            )
+        }
+    }
+
+    override fun enterPipNow() {
+        val params = pipParams ?: return
+        vm.expectingExternal = true
+        runCatching { enterPictureInPictureMode(params) }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12+ enters on its own (auto-enter); older versions need asking.
+        if (Build.VERSION.SDK_INT < 31 && pipParams != null && !vm.expectingExternal) enterPipNow()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        vm.inPip = isInPictureInPictureMode
+        if (isInPictureInPictureMode) vm.expectingExternal = true
     }
 
     /** Your own name and picture in the recent-apps list. */
@@ -73,6 +173,11 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Closing the floating video window counts as leaving the app.
+        if (vm.inPip) {
+            vm.inPip = false
+            vm.expectingExternal = false
+        }
         if (!isChangingConfigurations) {
             vm.applyLauncherChanges()
             vm.onLeftApp()

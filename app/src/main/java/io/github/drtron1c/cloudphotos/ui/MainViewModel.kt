@@ -50,6 +50,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -79,6 +80,12 @@ sealed interface Phase {
     data object Ready : Phase
 }
 
+/** The activity side of picture-in-picture (kept weakly by the view model). */
+interface PipHost {
+    fun setPipCandidate(playing: Boolean, w: Int, h: Int)
+    fun enterPipNow()
+}
+
 sealed interface Route {
     /** A grid of any registered list (album, shared album, search results, utilities…). */
     data class Grid(val key: String) : Route
@@ -89,6 +96,17 @@ sealed interface Route {
     data object AllAlbums : Route
     data object AppIdentity : Route
     data object Vpn : Route
+    data object Memories : Route
+    data class MemoryPlayer(val id: String) : Route
+    data object People : Route
+    data class Person(val id: String) : Route
+    data object Places : Route
+    data object Similar : Route
+    data class Trim(val key: String, val index: Int) : Route
+
+    /** Covers the whole window (photo viewer, slideshow, editor…), even next to a sidebar. */
+    val fullScreen: Boolean
+        get() = this is Viewer || this is Slideshow || this is Editor || this is MemoryPlayer || this is Trim
 }
 
 enum class Tab { Library, Albums, Search }
@@ -369,6 +387,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             watchLibraryForIndex()
             loadAlbums()
             scheduleBackgroundWork()
+            consumePendingOpen()
         } catch (e: CancellationException) {
             throw e
         } catch (e: SessionExpiredException) {
@@ -592,6 +611,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             busy = "Searching…"
             try {
+                // Only the visible library: the index never contains Hidden or Recently Deleted items.
                 val candidates = index.entries.filter { m.matchesFilters(it, zoneId) }.map { it.id }
                 val (ranked, confident) = smart.rank(m.phrase, candidates)
                 busy = null
@@ -837,7 +857,108 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- navigation ----------------
 
     fun open(route: Route) {
+        // Photo open beside the grid: tapping another photo swaps it rather than stacking up.
+        if (route is Route.Viewer && splitActive) {
+            val i = stack.indexOfFirst { it is Route.Viewer }
+            if (i >= 0) while (stack.size > i) stack.removeAt(stack.lastIndex)
+        }
         stack.add(route)
+    }
+
+    /** Sidebar / shortcut: straight to a tab. */
+    fun goHome(t: Tab) {
+        stack.clear()
+        tab = t
+    }
+
+    /** Sidebar / shortcut: straight to a screen. */
+    fun goTo(route: Route) {
+        stack.clear()
+        stack.add(route)
+    }
+
+    // ---------------- keyboard ----------------
+
+    val keys = KeyRouter()
+    var showShortcuts by mutableStateOf(false)
+    /** Bumped by Ctrl+F: the Search tab focuses its field. */
+    var focusSearch by mutableIntStateOf(0)
+    /** Bumped by Ctrl+U: opens the upload picker. */
+    var uploadRequest by mutableIntStateOf(0)
+    /** Set by the layout: a photo is open beside the grid. */
+    var splitActive = false
+    /** The photo open beside the grid (highlighted in it). */
+    var viewingId by mutableStateOf<String?>(null)
+    // ---------------- picture-in-picture ----------------
+
+    var pipHost: java.lang.ref.WeakReference<PipHost>? = null
+    /** The app is shrunk to the floating video window. */
+    var inPip by mutableStateOf(false)
+    fun pipCandidate(playing: Boolean, w: Int, h: Int) = pipHost?.get()?.setPipCandidate(playing, w, h)
+    fun enterPip() = pipHost?.get()?.enterPipNow()
+
+    /** Opened from an app shortcut, the Quick Settings tile or a notification. */
+    fun openFromOutside(target: String) {
+        pendingOpen = target
+        if (phase == Phase.Ready) consumePendingOpen()
+    }
+
+    private var pendingOpen: String? = null
+
+    private fun consumePendingOpen() {
+        val t = pendingOpen ?: return
+        pendingOpen = null
+        when (t) {
+            "search" -> { goHome(Tab.Search); focusSearch++ }
+            "favourites" -> { stack.clear(); openAlbum(AlbumSpec.FAVORITES) }
+            "memories" -> goTo(Route.Memories)
+            "places" -> goTo(Route.Places)
+            "people" -> goTo(Route.People)
+            "upload" -> { goHome(Tab.Library); if (canUpload) uploadRequest++ }
+            "vpn" -> goTo(Route.Vpn)
+            "onthisday" -> {
+                stack.clear()
+                val l = onThisDayList()
+                if (l != null) openList(l) else { pendingOpen = "onthisday"; waitForIndexThenOpen() }
+            }
+        }
+    }
+
+    private fun waitForIndexThenOpen() {
+        viewModelScope.launch {
+            snapshotFlow { indexMatchesLibrary }.first { it }
+            consumePendingOpen()
+        }
+    }
+
+    /** Something is being dragged over the app (drop to upload). */
+    var dropHover by mutableStateOf(false)
+
+    /** A key from a hardware keyboard. [typing] = a text field has the keyboard. */
+    fun handleKey(e: android.view.KeyEvent, typing: Boolean): Boolean {
+        val code = e.keyCode
+        if (typing && !e.ctrl) return false
+        if (keys.dispatch(e)) return true
+        if (phase != Phase.Ready) return false
+        return when {
+            (e.ctrl && code == android.view.KeyEvent.KEYCODE_F) || (e.plain && code == android.view.KeyEvent.KEYCODE_SLASH) -> {
+                goHome(Tab.Search); focusSearch++; true
+            }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_1 -> { goHome(Tab.Library); true }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_2 -> { goHome(Tab.Albums); true }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_3 -> { goHome(Tab.Search); true }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_M && !offlineMode -> { goTo(Route.Memories); true }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_COMMA -> {
+                if (stack.lastOrNull() != Route.Settings) open(Route.Settings); true
+            }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_U -> { if (canUpload) uploadRequest++; true }
+            (e.ctrl && code == android.view.KeyEvent.KEYCODE_R) || code == android.view.KeyEvent.KEYCODE_F5 -> {
+                if (!offlineMode) { refreshAll(); toast("Refreshing…") }; true
+            }
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_SLASH -> { showShortcuts = true; true }
+            code == android.view.KeyEvent.KEYCODE_ESCAPE || (e.isAltPressed && code == android.view.KeyEvent.KEYCODE_DPAD_LEFT) -> back()
+            else -> false
+        }
     }
 
     fun back(): Boolean {
@@ -887,6 +1008,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun delete(assets: List<Asset>, done: () -> Unit = {}) = batch(assets, {
         removeEverywhere(assets, except = AlbumSpec.RECENTLY_DELETED)
         index.remove(assets.map { it.id }.toSet())
+        // Smart Search never keeps or searches anything in Recently Deleted.
+        viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()) }
         listFor(AlbumSpec.RECENTLY_DELETED)?.refresh()
         done()
     }) { a -> graph.photos.setDeleted(a, true) }
@@ -901,6 +1024,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (hidden) {
             removeEverywhere(assets, except = AlbumSpec.HIDDEN)
             index.remove(assets.map { it.id }.toSet())
+            // …or in Hidden.
+            viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()) }
             listFor(AlbumSpec.HIDDEN)?.refresh()
         } else {
             listFor(AlbumSpec.HIDDEN)?.removeAll(assets.map { it.id }.toSet())

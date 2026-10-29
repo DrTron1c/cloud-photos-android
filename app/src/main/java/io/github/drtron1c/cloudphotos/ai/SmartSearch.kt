@@ -216,6 +216,14 @@ class SmartSearch(private val context: Context, private val settings: AppSetting
         if (good.isNotEmpty()) good to true else scored.take(FALLBACK_RESULTS) to false
     }
 
+    /** Hidden or deleted photos: drop what was learned about them straight away. */
+    suspend fun forget(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val idx = index()
+        val removed = synchronized(idx) { idx.keys.removeAll(ids) }
+        if (removed) saveIndex()
+    }
+
     fun deleteAll() {
         model?.close()
         model = null
