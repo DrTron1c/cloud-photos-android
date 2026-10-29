@@ -84,6 +84,13 @@ class Packed(val q: ByteArray, val scale: Float) {
         return s * scale
     }
 
+    /** Similarity of two stored embeddings. */
+    fun similarity(other: Packed): Float {
+        var s = 0
+        for (i in q.indices) s += q[i] * other.q[i]
+        return s * scale * other.scale
+    }
+
     companion object {
         fun of(unit: FloatArray): Packed {
             var m = 0f

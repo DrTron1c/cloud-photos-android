@@ -946,7 +946,11 @@ private fun InfoSheet(vm: MainViewModel, asset: Asset, editable: Boolean) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Place, null, tint = p.accent, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("%.5f, %.5f".format(lat, lon), color = p.label, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    val place = remember(lat, lon) { vm.placeLabel(lat, lon) }
+                    Column(Modifier.weight(1f)) {
+                        if (place != null) Text(place, color = p.label, fontSize = 16.sp)
+                        Text("%.5f, %.5f".format(lat, lon), color = if (place != null) p.secondaryLabel else p.label, fontSize = if (place != null) 13.sp else 16.sp)
+                    }
                     TextButton(onClick = {
                         vm.expectingExternal = true
                         runCatching {
@@ -958,6 +962,8 @@ private fun InfoSheet(vm: MainViewModel, asset: Asset, editable: Boolean) {
                 HorizontalDivider(thickness = 0.5.dp, color = p.separator)
             }
         }
+        val names = remember(asset.id) { vm.namesIn(asset.id) }
+        if (names.isNotEmpty()) InfoLine("People", names.joinToString(", "))
         if (asset.isEdited) InfoLine("Edited", "Yes — sharing and saving use the edited version")
         if (asset.isFavorite) InfoLine("Favourite", "Yes")
         if (asset.addedDate > 0) InfoLine("Added to iCloud", formatFullDate(asset.addedDate))

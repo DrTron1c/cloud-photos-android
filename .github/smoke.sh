@@ -64,6 +64,19 @@ adb shell settings put system user_rotation 0; sleep 3
 adb shell input keyevent KEYCODE_HOME; sleep 3
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 6; shot 6-reopened
 
+# Long-press app shortcuts are published; the Quick Settings tile opens the app; keyboard keys don't crash.
+adb shell dumpsys shortcut 2>/dev/null | grep -A40 "Package: $PKG" | grep -oE "id=(search|favourites|memories|upload)" | sort -u > $OUT/shortcuts.txt
+adb shell cmd statusbar add-tile $PKG/.vpn.VpnTileService > $OUT/tile.txt 2>&1
+adb shell cmd statusbar click-tile $PKG/.vpn.VpnTileService >> $OUT/tile.txt 2>&1; sleep 4
+adb shell cmd statusbar collapse > /dev/null 2>&1; sleep 2
+adb shell dumpsys activity activities | grep -E "topResumedActivity" | head -2 >> $OUT/tile.txt
+adb shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_SLASH > /dev/null 2>&1; sleep 1
+adb shell input keyevent KEYCODE_TAB KEYCODE_DPAD_RIGHT KEYCODE_ESCAPE > /dev/null 2>&1; sleep 2
+shot 6b-after-tile-and-keys
+# Tablet-size screen: the sign-in screen at iPad-like size.
+adb shell wm size 1600x2560; adb shell wm density 320; sleep 5; shot 6c-tablet
+adb shell wm size reset; adb shell wm density reset; sleep 4
+
 # Companion app made from the template (name "AAA My Photos", teal picture): install, open, and
 # check it shows in the app drawer and opens Cloud Photos.
 COMP=app/build/launcher-test/CustomLauncher.apk
@@ -91,10 +104,10 @@ if [ -f "$TEST" ]; then
   adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
   adb shell appops set io.github.drtron1c.cloudphotos ACTIVATE_VPN allow
   adb logcat -c
-  timeout 600 adb shell am instrument -r -w \
+  timeout 1100 adb shell am instrument -r -w \
     io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
   echo "exit=$?" >> $OUT/device-test.txt
-  adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err|WireGuard|GoBackend|onnx" | tail -250 > $OUT/device-test-logcat.txt
+  adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err|WireGuard|GoBackend|onnx|Transformer|heif" | tail -400 > $OUT/device-test-logcat.txt
   for f in glass-light.png glass-dark.png; do adb pull /sdcard/Download/$f $OUT/$f 2>&1 | tail -1; done
   adb shell input keyevent KEYCODE_HOME; sleep 2
   adb shell input swipe 540 2000 540 600 300; sleep 3

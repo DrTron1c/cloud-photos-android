@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Share
@@ -150,19 +151,21 @@ fun PhotoGrid(
     onSelectingChanged: (Boolean) -> Unit = {},
     onUploadClick: (() -> Unit)? = null,
     jumpTo: Int? = null,
+    keyLevel: Int = 0,
+    keysEnabled: Boolean = true,
 ) {
     val p = LocalPalette.current
     val s = vm.settings
     val count = list.count
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val widthDp = LocalConfiguration.current.screenWidthDp
+    val widthDp = contentWidthDp()
     val options = gridColumnOptions(widthDp)
     val level = s.gridLevel.coerceIn(0, options.lastIndex)
     val columns = options[level]
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomReserve = navBottom + (if (isRoot) TAB_BAR_HEIGHT.dp else 0.dp) + extraBottom
+    val bottomReserve = navBottom + (if (isRoot && !LocalNoTabBar.current) TAB_BAR_HEIGHT.dp else 0.dp) + extraBottom
     val editable = list.spec.editable && !vm.offlineMode
 
     var selecting by remember { mutableStateOf(false) }
@@ -176,6 +179,29 @@ fun PhotoGrid(
         onSelectingChanged(false)
     }
     LaunchedEffect(selecting) { onSelectingChanged(selecting) }
+    // Hardware keyboard: Ctrl+A, Delete, Esc, Ctrl+= / Ctrl+-.
+    KeyShortcuts(vm, keyLevel, enabled = keysEnabled && vm.stack.size == keyLevel) { e ->
+        val code = e.keyCode
+        when {
+            e.ctrl && code == android.view.KeyEvent.KEYCODE_A && count > 0 -> {
+                selecting = true
+                for (i in 0 until count) list[i]?.let { selected[it.id] = it } ?: list.ensure(i)
+                true
+            }
+            e.ctrl && (code == android.view.KeyEvent.KEYCODE_EQUALS || code == android.view.KeyEvent.KEYCODE_PLUS || code == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> {
+                if (level > 0) vm.changeGridLevel(level - 1); true
+            }
+            e.ctrl && (code == android.view.KeyEvent.KEYCODE_MINUS || code == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> {
+                if (level < options.lastIndex) vm.changeGridLevel(level + 1); true
+            }
+            code == android.view.KeyEvent.KEYCODE_ESCAPE && selecting -> { endSelection(); true }
+            (code == android.view.KeyEvent.KEYCODE_FORWARD_DEL || code == android.view.KeyEvent.KEYCODE_DEL) && selecting && selected.isNotEmpty() && editable -> {
+                if (s.confirmDelete) confirmDelete = true else vm.delete(selected.values.toList()) { endSelection() }
+                true
+            }
+            else -> false
+        }
+    }
     // The photos are the backdrop for the glass header buttons and toolbar.
     val glass = LocalGlassEnabled.current
     val gridGlass = if (glass) rememberGlassBackdrop() else null
@@ -542,6 +568,11 @@ fun PhotoGrid(
                                     leadingIcon = { Icon(Icons.Outlined.Download, null) },
                                     onClick = { menu = false; vm.saveToDevice(chosen); endSelection() },
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("Export…") },
+                                    leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
+                                    onClick = { menu = false; vm.exportAssets(chosen, list.spec.title); endSelection() },
+                                )
                                 if (editable) {
                                     if (list.spec.kind == AlbumKind.Hidden) {
                                         DropdownMenuItem(
@@ -667,6 +698,9 @@ private fun GridCell(
                             .shadow(2.dp, CircleShape, clip = false),
                     )
                 }
+            }
+            if (asset.id == vm.viewingId) {
+                Box(Modifier.fillMaxSize().border(3.dp, p.accent))
             }
             if (selecting) {
                 if (isSelected) {

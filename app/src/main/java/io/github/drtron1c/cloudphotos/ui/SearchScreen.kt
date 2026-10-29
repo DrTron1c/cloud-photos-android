@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -60,10 +61,13 @@ fun SearchTab(vm: MainViewModel) {
     val p = LocalPalette.current
     val activity = LocalContext.current.findActivity() as? FragmentActivity
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + TAB_BAR_HEIGHT.dp
+    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + if (LocalNoTabBar.current) 0.dp else TAB_BAR_HEIGHT.dp
     var query by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
     val ready = vm.indexMatchesLibrary
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Ctrl+F or / from anywhere lands in the search field.
+    androidx.compose.runtime.LaunchedEffect(vm.focusSearch) { if (vm.focusSearch > 0) runCatching { focus.requestFocus() } }
 
     fun run(q: String) {
         if (q.isBlank()) return
@@ -95,7 +99,7 @@ fun SearchTab(vm: MainViewModel) {
             shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { run(query) }),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().focusRequester(focus),
         )
         Spacer(Modifier.height(16.dp))
 
@@ -114,7 +118,7 @@ fun SearchTab(vm: MainViewModel) {
         if (query.isNotBlank()) {
             val n = remember(query, vm.index.entries) { vm.searchCount(query) }
             val smartQuery = remember(query) { SearchQuery.parse(query)?.hasPhrase == true }
-            if (n == 0 && smartQuery && vm.smartReady) {
+            if (n == 0 && smartQuery && (vm.smartReady || (vm.settings.aiText && vm.vision.textDone.value > 0) || vm.people.isNotEmpty())) {
                 Button(onClick = { run(query) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.AutoAwesome, null)
                     Spacer(Modifier.width(8.dp))
@@ -153,6 +157,10 @@ fun SearchTab(vm: MainViewModel) {
 
         Section("Collections")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Memories") { vm.open(Route.Memories) }
+            Chip("People & Pets") { vm.open(Route.People) }
+            Chip("Places") { vm.open(Route.Places) }
+            Chip("Similar Photos") { vm.open(Route.Similar) }
             Chip("Recently Saved") { vm.openAlbum(AlbumSpec.RECENTLY_SAVED) }
             Chip("On This Day") { vm.onThisDayList()?.let { vm.openList(it) } ?: vm.toast("Still organising your library…") }
             Chip("Recently Edited") { vm.recentlyEditedList()?.let { vm.openList(it) } ?: vm.toast("Still organising your library…") }

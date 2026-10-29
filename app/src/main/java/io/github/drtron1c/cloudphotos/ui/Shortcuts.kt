@@ -39,6 +39,10 @@ class KeyRouter {
 
     fun dispatch(e: KeyEvent): Boolean =
         entries.sortedByDescending { it.level }.any { it.handler(e) }
+
+    /** Unit tests: routing without a real key. */
+    internal fun dispatchForTest(): Boolean =
+        entries.sortedByDescending { it.level }.any { it.handler(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A)) }
 }
 
 /** Registers [handler] while this composable is shown (and [enabled]). */

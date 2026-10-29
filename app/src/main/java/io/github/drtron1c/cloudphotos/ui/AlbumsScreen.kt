@@ -43,6 +43,8 @@ import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Face
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
@@ -109,6 +111,8 @@ fun iconFor(spec: AlbumSpec): ImageVector = when (spec.icon) {
     "duplicates" -> Icons.Outlined.ContentCopy
     "onthisday" -> Icons.Outlined.AutoAwesome
     "search" -> Icons.Outlined.Search
+    "people" -> Icons.Outlined.Face
+    "place" -> Icons.Outlined.Map
     else -> Icons.Outlined.Image
 }
 
@@ -128,8 +132,8 @@ fun AlbumsTab(vm: MainViewModel) {
     val p = LocalPalette.current
     val activity = LocalContext.current.findActivity() as? FragmentActivity
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + TAB_BAR_HEIGHT.dp
-    val tile = if (LocalConfiguration.current.screenWidthDp >= 600) 190.dp else 150.dp
+    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + if (LocalNoTabBar.current) 0.dp else TAB_BAR_HEIGHT.dp
+    val tile = if (contentWidthDp() >= 600) 190.dp else 150.dp
     var newAlbum by remember { mutableStateOf(false) }
 
     if (vm.offlineMode) {
@@ -155,6 +159,23 @@ fun AlbumsTab(vm: MainViewModel) {
                 Pill(icon = Icons.Filled.Refresh, onDark = false, onClick = { vm.refreshAll() })
                 Spacer(Modifier.width(8.dp))
                 Pill(icon = Icons.Filled.Settings, onDark = false, onClick = { vm.open(Route.Settings) })
+            }
+        }
+        // Memories, People & Pets, Places — made on this device.
+        item { LaunchedEffect(vm.indexMatchesLibrary, vm.index.entries) { vm.refreshMemories() } }
+        if (vm.memories.isNotEmpty()) {
+            item { SectionHeader("Memories", action = "See All") { vm.open(Route.Memories) } }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(vm.memories.take(12), key = { it.id }) { m -> MemoryCard(vm, m, Modifier.width(tile * 1.8f), height = tile * 1.2f) }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CollectionButton(Icons.Outlined.AutoAwesome, "Memories", Modifier.weight(1f)) { vm.open(Route.Memories) }
+                CollectionButton(Icons.Outlined.Face, "People & Pets", Modifier.weight(1f)) { vm.open(Route.People) }
+                CollectionButton(Icons.Outlined.Map, "Places", Modifier.weight(1f)) { vm.open(Route.Places) }
             }
         }
         item { SectionHeader("My Albums", action = "See All") { vm.open(Route.AllAlbums) } }
@@ -202,6 +223,9 @@ fun AlbumsTab(vm: MainViewModel) {
             item { VirtualRow(vm, "Recently Viewed", "viewed") { vm.recentlyViewedList() } }
         }
         item { VirtualRow(vm, "Duplicates", "duplicates") { vm.duplicatesList() } }
+        item {
+            AlbumRow(vm, AlbumSpec.virtual("similar", "Similar Photos", "duplicates"), -1, locked = false) { vm.open(Route.Similar) }
+        }
         item { VirtualRow(vm, "On This Day", "onthisday") { vm.onThisDayList() } }
         items(listOf(AlbumSpec.HIDDEN, AlbumSpec.RECENTLY_DELETED), key = { it.key }) { spec ->
             AlbumRow(vm, spec, -1, locked = vm.settings.lockPrivateAlbums) { openAlbum(vm, activity, spec) }
@@ -248,6 +272,19 @@ private fun OfflineAlbums(vm: MainViewModel, top: Dp, bottom: Dp, tile: Dp) {
                 AlbumTileAdaptive(vm, vm.list(spec)) { vm.openAlbum(spec) }
             }
         }
+    }
+}
+
+@Composable
+private fun CollectionButton(icon: ImageVector, title: String, modifier: Modifier, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(p.placeholder).clickable(onClick = onClick).padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = p.accent, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(title, color = p.label, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -371,7 +408,7 @@ fun AllAlbumsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val p = LocalPalette.current
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val wide = contentWidthDp() >= 600
     val specs = remember(vm.userAlbums) {
         listOf(AlbumSpec.LIBRARY.copy(title = "Recents"), AlbumSpec.FAVORITES) +
             vm.userAlbums.map { AlbumSpec.user(it.recordName, it.title) }

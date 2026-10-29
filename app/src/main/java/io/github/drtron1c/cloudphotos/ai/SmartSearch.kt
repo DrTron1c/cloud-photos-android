@@ -216,6 +216,58 @@ class SmartSearch(private val context: Context, private val settings: AppSetting
         if (good.isNotEmpty()) good to true else scored.take(FALLBACK_RESULTS) to false
     }
 
+    /**
+     * Pets: photos the model thinks are mainly of a dog or a cat (it can't tell one dog from
+     * another, so they're grouped by kind).
+     */
+    suspend fun pets(ids: Collection<String>): Map<String, List<String>> = withContext(Dispatchers.Default) {
+        val idx = index()
+        val m = model()
+        val prompts = listOf(
+            "dogs" to "a photo of a dog", "cats" to "a photo of a cat",
+            "-" to "a photo of a person", "-" to "a photo of people", "-" to "a photo of food", "-" to "a landscape",
+            "-" to "a screenshot", "-" to "a photo of a building", "-" to "a photo of a car", "-" to "a document",
+            "-" to "a photo of a toy", "-" to "a photo of a bird",
+        )
+        val q = prompts.map { m.embedText(it.second) }
+        val out = HashMap<String, MutableList<String>>()
+        for (id in ids) {
+            val e = idx[id] ?: continue
+            var best = -1
+            var bs = -1f
+            q.forEachIndexed { i, v -> val sc = e.similarity(v); if (sc > bs) { bs = sc; best = i } }
+            val kind = prompts[best].first
+            if (kind != "-" && bs >= PET_SCORE) out.getOrPut(kind) { ArrayList() } += id
+        }
+        out
+    }
+
+    /**
+     * Similar photos (bursts, retakes): runs of photos taken close together that look almost the
+     * same. [ordered] is the library in date order with each photo's time.
+     */
+    suspend fun similarGroups(ordered: List<Pair<String, Long>>): List<List<String>> = withContext(Dispatchers.Default) {
+        val idx = index()
+        val groups = ArrayList<List<String>>()
+        var current = ArrayList<String>()
+        var lastTime = 0L
+        var anchor: Packed? = null
+        for ((id, time) in ordered) {
+            val e = idx[id]
+            val close = e != null && anchor != null && kotlin.math.abs(time - lastTime) <= SIMILAR_WINDOW_MS &&
+                e.similarity(anchor!!) >= SIMILAR_SCORE
+            if (close) current += id
+            else {
+                if (current.size >= 2) groups += current
+                current = ArrayList<String>().also { if (e != null) it += id }
+                anchor = e
+            }
+            if (e != null) lastTime = time
+        }
+        if (current.size >= 2) groups += current
+        groups
+    }
+
     /** Hidden or deleted photos: drop what was learned about them straight away. */
     suspend fun forget(ids: Set<String>) {
         if (ids.isEmpty()) return
@@ -248,20 +300,41 @@ class SmartSearch(private val context: Context, private val settings: AppSetting
         private const val SPREAD = 0.075f
         private const val MAX_RESULTS = 1500
         private const val FALLBACK_RESULTS = 24
+        private const val PET_SCORE = 0.2f
+        /** Nearly the same picture (MobileCLIP image to image), taken within 20 minutes. */
+        private const val SIMILAR_SCORE = 0.92f
+        private const val SIMILAR_WINDOW_MS = 20 * 60_000L
     }
 }
 
-/** Analyses library photos in the background (newest first), a few minutes at a time. */
+/**
+ * Analyses library photos in the background (newest first), a few minutes at a time: Smart Search
+ * (thumbnails), and — when switched on — faces for People and the text in photos (medium-size
+ * copies). Only the visible library is ever fetched: Hidden and Recently Deleted are never
+ * analysed. Everything runs and stays on this device.
+ */
 class SmartIndexWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val graph = (applicationContext as CloudPhotosApp).graph
         val settings = graph.settings
         val smart = graph.smart
+        val vision = graph.vision
         fun status(s: String) = settings.raw().edit().putString(Keys.AI_STATUS, s).apply()
-        if (!settings.aiSearch) return Result.success()
-        if (!smart.filesPresent()) {
-            status("Downloading the AI model…")
+        val wantClip = settings.aiSearch
+        val wantFaces = settings.aiPeople
+        val wantText = settings.aiText
+        if (!wantClip && !wantFaces && !wantText) return Result.success()
+        if (wantClip && !smart.filesPresent()) {
+            status("Downloading the Smart Search model…")
             if (!smart.downloadModel(graph.http)) return Result.retry()
+        }
+        if (wantFaces && !vision.facePack.present()) {
+            status("Downloading the People model…")
+            if (!vision.facePack.download(graph.http)) return Result.retry()
+        }
+        if (wantText && !vision.textPack.present()) {
+            status("Downloading the text reader…")
+            if (!vision.textPack.download(graph.http)) return Result.retry()
         }
         val signedIn = runCatching { graph.auth.isSignedIn && graph.auth.resume() }.getOrDefault(false)
         if (!signedIn) {
@@ -270,41 +343,57 @@ class SmartIndexWorker(context: Context, params: WorkerParameters) : CoroutineWo
         }
         val started = System.currentTimeMillis()
         val idx = smart.index()
+        vision.load()
+        // The Library list itself leaves out Hidden and Recently Deleted.
         val total = runCatching { graph.photos.count(AlbumSpec.LIBRARY) }.getOrElse { return Result.retry() }
         var start = 0
         var added = 0
         val seen = HashSet<String>()
+        suspend fun saveAll() {
+            if (wantClip) smart.saveIndex()
+            if (wantFaces || wantText) vision.save()
+        }
+        fun progress() = status("Analysing photos on this device… %,d of %,d".format(seen.size, total))
+        suspend fun fetch(url: String): ByteArray? = runCatching {
+            graph.http.newCall(Request.Builder().url(url).build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+        }.getOrNull()
         while (start < total) {
-            val page = runCatching { graph.photos.page(AlbumSpec.LIBRARY, start, 100) }.getOrElse { smart.saveIndex(); return Result.retry() }
+            val page = runCatching { graph.photos.page(AlbumSpec.LIBRARY, start, 100) }.getOrElse { saveAll(); return Result.retry() }
             if (page.isEmpty()) break
             start += page.size
             for (asset in page) {
                 seen += asset.id
-                if (idx.containsKey(asset.id)) continue
-                val thumb = asset.thumbnail ?: continue
-                val bytes = runCatching {
-                    graph.http.newCall(Request.Builder().url(thumb.url).build()).execute().use { r ->
-                        if (r.isSuccessful) r.body?.bytes() else null
-                    }
-                }.getOrNull() ?: continue
-                val e = runCatching { smart.embedPicture(bytes) }.getOrNull() ?: continue
-                synchronized(idx) { idx[asset.id] = Packed.of(e) }
-                added++
-                if (added % 50 == 0) {
-                    smart.saveIndex()
-                    status("Analysing photos on this device… %,d of %,d".format(idx.size, total))
+                if (asset.isHidden) continue
+                val needClip = wantClip && !idx.containsKey(asset.id)
+                val needFaces = wantFaces && !asset.isVideo && !vision.hasFaces(asset.id)
+                val needText = wantText && !asset.isVideo && !vision.hasText(asset.id)
+                if (!needClip && !needFaces && !needText) continue
+                if (needClip) {
+                    val thumb = asset.thumbnail
+                    val bytes = thumb?.let { fetch(it.url) }
+                    val e = bytes?.let { runCatching { smart.embedPicture(it) }.getOrNull() }
+                    if (e != null) synchronized(idx) { idx[asset.id] = Packed.of(e) }
                 }
+                if (needFaces || needText) {
+                    val v = asset.medium ?: asset.thumbnail
+                    val bytes = v?.let { fetch(it.url) }
+                    if (bytes != null) runCatching { vision.analyse(asset.id, bytes, needFaces, needText) }
+                }
+                added++
+                if (added % 40 == 0) { saveAll(); progress() }
                 if (System.currentTimeMillis() - started > 8 * 60_000L) {
-                    smart.saveIndex()
-                    status("Analysing photos on this device… %,d of %,d".format(idx.size, total))
+                    saveAll(); progress()
                     return Result.retry()
                 }
             }
         }
-        // A full pass: forget photos that were deleted.
-        if (start >= total) synchronized(idx) { idx.keys.retainAll(seen) }
-        smart.saveIndex()
-        status("Ready · %,d photos analysed".format(idx.size))
+        // A full pass: forget photos that were deleted (or hidden) since.
+        if (start >= total) {
+            synchronized(idx) { idx.keys.retainAll(seen) }
+            vision.retainOnly(seen)
+        }
+        saveAll()
+        status("Ready · %,d photos analysed".format(seen.size))
         return Result.success()
     }
 

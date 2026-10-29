@@ -81,24 +81,47 @@ class MediaActions(private val context: Context, private val http: OkHttpClient)
         return uri
     }
 
+    /**
+     * Download the current version (edit or original) into [dir]. With [compatible], HEIC photos
+     * become JPEG ("Most Compatible", like the iPhone's transfer setting).
+     */
+    suspend fun downloadCurrent(asset: Asset, dir: File, compatible: Boolean): File = withContext(Dispatchers.IO) {
+        val v = asset.current ?: throw IOException("Nothing to download for ${asset.filename}")
+        val wanted = asset.currentFilename.replace('/', '_')
+        val convert = compatible && !asset.isVideo && LocalCopies.isHeif(wanted)
+        val finalName = if (convert) wanted.substringBeforeLast('.') + ".JPG" else wanted
+        var name = finalName
+        var n = 1
+        while (File(dir, name).exists()) {
+            name = finalName.substringBeforeLast('.') + "_" + (n++) + "." + finalName.substringAfterLast('.', "jpg")
+        }
+        val file = File(dir, name)
+        if (!convert) {
+            open(v, wanted) { input, total -> file.outputStream().use { copy(input, it, total) {} } }
+        } else {
+            val raw = File(dir, "." + System.nanoTime() + "_" + wanted)
+            try {
+                open(v, wanted) { input, total -> raw.outputStream().use { copy(input, it, total) {} } }
+                LocalCopies.toJpeg(raw, file)
+            } finally {
+                raw.delete()
+            }
+        }
+        file
+    }
+
     /** Download items into the app cache and build a share intent for them. */
-    suspend fun shareIntent(assets: List<Asset>, onProgress: (Int, Int) -> Unit = { _, _ -> }): Intent {
+    suspend fun shareIntent(assets: List<Asset>, compatible: Boolean = false, onProgress: (Int, Int) -> Unit = { _, _ -> }): Intent {
         val dir = File(context.cacheDir, "shared").apply { mkdirs() }
         withContext(Dispatchers.IO) { dir.listFiles()?.forEach { it.delete() } }
         val uris = ArrayList<Uri>()
         val mimes = HashSet<String>()
         assets.forEachIndexed { i, asset ->
             onProgress(i, assets.size)
-            val v = asset.current ?: return@forEachIndexed
-            var name = asset.currentFilename.replace('/', '_')
-            var n = 1
-            while (File(dir, name).exists()) {
-                name = asset.currentFilename.substringBeforeLast('.') + "_" + (n++) + "." + asset.currentFilename.substringAfterLast('.', "jpg")
-            }
-            val file = File(dir, name)
-            open(v, name) { input, total -> file.outputStream().use { copy(input, it, total) {} } }
+            if (asset.current == null) return@forEachIndexed
+            val file = downloadCurrent(asset, dir, compatible)
             uris += FileProvider.getUriForFile(context, context.packageName + ".files", file)
-            mimes += Asset.mimeFor(name)
+            mimes += Asset.mimeFor(file.name)
         }
         if (uris.isEmpty()) throw IOException("Nothing to share")
         val mime = when {
@@ -119,6 +142,20 @@ class MediaActions(private val context: Context, private val http: OkHttpClient)
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+        }
+    }
+
+    /** Export one item into a folder you picked (Files, a USB drive, an SD card, a cloud drive…). */
+    suspend fun exportTo(tree: Uri, asset: Asset, compatible: Boolean) = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "export").apply { mkdirs() }
+        val file = downloadCurrent(asset, dir, compatible)
+        try {
+            val resolver = context.contentResolver
+            val doc = LocalCopies.createInTree(resolver, tree, file.name, Asset.mimeFor(file.name))
+            resolver.openOutputStream(doc)?.use { out -> file.inputStream().use { it.copyTo(out, 256 * 1024) } }
+                ?: throw IOException("Couldn't write ${file.name}")
+        } finally {
+            file.delete()
         }
     }
 

@@ -11,3 +11,5 @@
 -dontwarn androidx.compose.**
 -dontwarn kotlinx.coroutines.**
 -dontwarn org.jetbrains.annotations.**
+-dontwarn androidx.media3.**
+-keep class androidx.heifwriter.** { *; }

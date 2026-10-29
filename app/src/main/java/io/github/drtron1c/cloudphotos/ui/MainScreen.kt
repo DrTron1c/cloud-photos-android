@@ -263,6 +263,7 @@ fun MainScreen(vm: MainViewModel) {
         }
     }
     if (vm.showShortcuts) ShortcutsDialog { vm.showShortcuts = false }
+    ExportFlow(vm)
 }
 
 /** One screen of the navigation stack. */

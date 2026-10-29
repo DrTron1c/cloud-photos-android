@@ -10,3 +10,5 @@
 -keep class androidx.compose.** { *; }
 -keep class kotlinx.coroutines.** { *; }
 -keep class androidx.activity.** { *; }
+# The media tests drive Media3 Transformer directly (making a test video from a picture).
+-keep class androidx.media3.** { *; }

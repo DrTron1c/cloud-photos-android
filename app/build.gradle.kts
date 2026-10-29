@@ -111,6 +111,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+    // Trimming videos on the device.
+    implementation("androidx.media3:media3-transformer:1.5.1")
+    implementation("androidx.media3:media3-effect:1.5.1")
 
     // Signs the companion app on the device.
     implementation("com.android.tools.build:apksig:8.7.3")
@@ -128,6 +131,8 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("junit:junit:4.13.2")
+    // Makes iPhone-style (tiled) HEIC files on the test emulator to check full-resolution zoom.
+    androidTestImplementation("androidx.heifwriter:heifwriter:1.0.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

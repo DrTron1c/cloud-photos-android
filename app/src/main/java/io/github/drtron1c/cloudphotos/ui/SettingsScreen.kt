@@ -94,6 +94,23 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     var offlineBytes by remember { mutableLongStateOf(0L) }
     LaunchedEffect(tick, vm.offlineAlbums) { offlineBytes = vm.offlineBytes() }
 
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.setMemoriesNotify(true) else vm.toast("Notifications are off for Cloud Photos in Android settings")
+    }
+    val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+            }.getOrNull() ?: "Your song"
+            s.memoryMusicUri = uri.toString()
+            s.memoryMusicName = name
+            s.memoryMusic = "custom"
+        }
+    }
+    var showShortcutList by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (AutoUploadWorker.hasMediaAccess(context)) dialog = "autoupload"
         else vm.toast("Cloud Photos needs access to your photos and videos to upload them")
@@ -180,6 +197,21 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
             Footer("Type any name and use any picture as the app's icon.")
 
+            // ---------- Display & big screens ----------
+            Group("Display & big screens") {
+                val display = remember(tick) { context.display }
+                val now = display?.refreshRate?.let { "%.0f Hz".format(it) } ?: "—"
+                val max = display?.supportedModes?.maxOfOrNull { it.refreshRate }?.let { "%.0f Hz".format(it) } ?: "—"
+                ToggleRow("Smooth motion", "Use the screen's fastest refresh rate (now $now, up to $max)", s.highRefresh) { s.highRefresh = it }
+                Divider()
+                ToggleRow("Sidebar on big screens", "Tablets and unfolded phones get an iPad-style sidebar instead of the tab bar", s.sidebar) { s.sidebar = it }
+                Divider()
+                ToggleRow("Photos beside the grid", "On big screens, open photos next to the grid so you can flick through both", s.splitViewer) { s.splitViewer = it }
+                Divider()
+                ActionRow("Keyboard Shortcuts", p.accent) { showShortcutList = true }
+            }
+            Footer("With a keyboard: press Ctrl+/ for shortcuts. In split screen or a floating window, long-press a photo to drag it into another app, or drop photos onto Cloud Photos to add them to iCloud.")
+
             // ---------- Library & grid ----------
             Group("Library") {
                 ToggleRow("Newest at top", "Off = newest at the bottom, like iPhone", s.newestOnTop) { vm.setNewestOnTop(it) }
@@ -229,6 +261,48 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 Divider()
                 ToggleRow("Shuffle", "Show photos in random order", s.slideshowShuffle) { s.slideshowShuffle = it }
             }
+
+            // ---------- Memories ----------
+            Group("Memories") {
+                ToggleRow("On This Day reminder", "A notification in the morning when you have photos from this day in past years", s.memoriesNotify) { on ->
+                    if (!on) vm.setMemoriesNotify(false)
+                    else if (android.os.Build.VERSION.SDK_INT >= 33 && !io.github.drtron1c.cloudphotos.memories.OnThisDayWorker.canNotify(context)) {
+                        vm.expectingExternal = true
+                        notifyPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else vm.setMemoriesNotify(true)
+                }
+                Divider()
+                Segmented(
+                    "Music",
+                    io.github.drtron1c.cloudphotos.memories.MemoryMusic.STYLES + listOf("custom" to "Yours", "none" to "None"),
+                    s.memoryMusic,
+                ) { choice ->
+                    if (choice == "custom" && s.memoryMusicUri.isEmpty()) {
+                        vm.expectingExternal = true
+                        musicPicker.launch(arrayOf("audio/*"))
+                    } else s.memoryMusic = choice
+                }
+                if (s.memoryMusic == "custom") {
+                    Divider()
+                    ValueRow("Your song", s.memoryMusicName.ifBlank { "Choose…" }) {
+                        vm.expectingExternal = true
+                        musicPicker.launch(arrayOf("audio/*"))
+                    }
+                }
+            }
+            Footer("Memories are made on this device. The built-in music is composed by the app itself; your own song is played from your device and never uploaded. The reminder shows no photo, and nothing about it on the lock screen.")
+
+            // ---------- Places ----------
+            Group("Places") {
+                ToggleRow("Show map", "Map pictures come from OpenStreetMap — their servers see which map areas you look at, never your photos", s.placesMap) { s.placesMap = it }
+            }
+            Footer("Place names (“Athens, Greece”) are worked out on this device from a built-in list of towns (GeoNames, CC BY 4.0).")
+
+            // ---------- Sharing ----------
+            Group("Sharing & exporting") {
+                ToggleRow("Share as Most Compatible", "Turn HEIC photos into JPEG when sharing or copying, like the iPhone's “Automatic” transfer setting", s.shareCompatible) { s.shareCompatible = it }
+            }
+            Footer("Export lets you choose each time. Select photos (or use an album's ••• menu) and pick Export… to copy them to any folder, USB drive, SD card or cloud drive.")
 
             // ---------- Widget ----------
             Group("Home-screen widget") {
@@ -388,8 +462,46 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     Divider()
                     ActionRow("Delete AI Model and Analysis", p.destructive) { vm.deleteAiData() }
                 }
+                Divider()
+                val faceState by vm.vision.facePack.state.collectAsState()
+                val facesDone by vm.vision.facesDone.collectAsState()
+                ToggleRow(
+                    "People & Pets",
+                    "Find and group faces so you can name people. One-time ${megabytes(vm.vision.facePack.downloadSize)} download" +
+                        when (val f = faceState) {
+                            is ModelState.Downloading -> " · downloading ${megabytes(f.bytes)}"
+                            is ModelState.Failed -> " · download failed"
+                            else -> if (s.aiPeople) " · %,d photos looked at".format(facesDone) else ""
+                        },
+                    s.aiPeople,
+                ) { vm.setAiPeople(it) }
+                if (s.aiPeople || facesDone > 0 || faceState !is ModelState.Missing) {
+                    Divider()
+                    ActionRow("Delete Faces and Names", p.destructive) { vm.deletePeopleData() }
+                }
+                Divider()
+                val textState by vm.vision.textPack.state.collectAsState()
+                val textDone by vm.vision.textDone.collectAsState()
+                ToggleRow(
+                    "Text in photos",
+                    "Read signs, documents and screenshots so you can search and copy their text. One-time ${megabytes(vm.vision.textPack.downloadSize)} download" +
+                        when (val t = textState) {
+                            is ModelState.Downloading -> " · downloading ${megabytes(t.bytes)}"
+                            is ModelState.Failed -> " · download failed"
+                            else -> if (s.aiText) " · %,d photos read".format(textDone) else ""
+                        },
+                    s.aiText,
+                ) { vm.setAiText(it) }
+                if (s.aiText || textDone > 0 || textState !is ModelState.Missing) {
+                    Divider()
+                    ActionRow("Delete Text Read from Photos", p.destructive) { vm.deleteTextData() }
+                }
             }
-            Footer("Photos are analysed from their small thumbnails on this device. Nothing about your photos or searches is sent anywhere; the model comes from Hugging Face (Apple's MobileCLIP).")
+            Footer(
+                "Everything is analysed on this device and stored encrypted in the app — nothing about your photos, faces, text or searches is ever sent anywhere. " +
+                    "Hidden and Recently Deleted photos are never analysed, and what was learned about a photo is wiped as soon as you hide or delete it. " +
+                    "The only downloads are the models themselves, once, from Hugging Face: Apple's MobileCLIP (search), OpenCV's YuNet and SFace (faces), PaddleOCR (text: Latin letters, numbers and Chinese)."
+            )
 
             // ---------- Updates ----------
             Group("Updates") {
@@ -438,6 +550,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
+    if (showShortcutList) ShortcutsDialog { showShortcutList = false }
     when (dialog) {
         "dns" -> ChoiceDialog(
             title = "Encrypted DNS",

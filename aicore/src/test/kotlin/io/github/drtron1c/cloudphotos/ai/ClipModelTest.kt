@@ -133,6 +133,24 @@ class ClipModelTest {
                 assertTrue(dot(img.getValue("red"), txt.getValue("red")) > dot(img.getValue("red"), txt.getValue("blue")))
                 assertTrue(dot(img.getValue("blue"), txt.getValue("blue")) > dot(img.getValue("blue"), txt.getValue("red")))
 
+                // Similar Photos: the same scene slightly moved (a retake) vs a different picture.
+                val (cp, cw, ch) = cats
+                val shiftX = cw / 12
+                val retake = IntArray((cw - shiftX) * ch) { i -> val y = i / (cw - shiftX); val x = i % (cw - shiftX); cp[y * cw + x + shiftX] }
+                val brighter = IntArray(cp.size) { i ->
+                    val c = cp[i]
+                    val r = minOf(255, ((c shr 16) and 0xff) + 18); val g = minOf(255, ((c shr 8) and 0xff) + 18); val b = minOf(255, (c and 0xff) + 18)
+                    (0xff shl 24) or (r shl 16) or (g shl 8) or b
+                }
+                val eRetake = model.embedImage(ImagePrep.toChw(retake, cw - shiftX, ch))
+                val eBright = model.embedImage(ImagePrep.toChw(brighter, cw, ch))
+                val sameRetake = Packed.of(img.getValue("cats")).similarity(Packed.of(eRetake))
+                val sameBright = Packed.of(img.getValue("cats")).similarity(Packed.of(eBright))
+                val other = Packed.of(img.getValue("cats")).similarity(Packed.of(img.getValue("red")))
+                println("SIMILAR retake=%.3f brighter=%.3f other=%.3f".format(sameRetake, sameBright, other))
+                assertTrue(sameRetake > 0.92f && sameBright > 0.92f)
+                assertTrue(other < 0.8f)
+
                 val packed = Packed.of(img.getValue("cats"))
                 val exact = dot(img.getValue("cats"), txt.getValue("two cats"))
                 assertTrue(kotlin.math.abs(packed.similarity(txt.getValue("two cats")) - exact) < 0.01f)

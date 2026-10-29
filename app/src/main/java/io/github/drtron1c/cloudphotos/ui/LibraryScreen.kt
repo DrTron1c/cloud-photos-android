@@ -78,7 +78,7 @@ fun LibraryTab(vm: MainViewModel, onUploadClick: () -> Unit) {
                 selected = view,
                 onSelect = { s.libraryView = it },
                 modifier = Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = navBottom + TAB_BAR_HEIGHT.dp + if (LocalGlassEnabled.current) 22.dp else 10.dp),
+                    .padding(bottom = navBottom + (if (LocalNoTabBar.current) 0.dp else TAB_BAR_HEIGHT.dp) + if (LocalGlassEnabled.current) 22.dp else 10.dp),
             )
         }
     }
@@ -162,7 +162,7 @@ private fun PeriodsView(vm: MainViewModel, byYear: Boolean) {
     }
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val wide = contentWidthDp() >= 600
     val newestTop = vm.settings.newestOnTop
     val jump = vm.pendingJump?.takeIf { it.first == "months" && !byYear }?.second
     val startIndex = remember(periods, jump) {

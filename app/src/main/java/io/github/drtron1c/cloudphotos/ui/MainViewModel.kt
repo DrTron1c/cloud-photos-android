@@ -30,6 +30,7 @@ import io.github.drtron1c.cloudphotos.photos.AlbumSpec
 import io.github.drtron1c.cloudphotos.photos.Asset
 import io.github.drtron1c.cloudphotos.photos.AssetList
 import io.github.drtron1c.cloudphotos.photos.IndexEntry
+import io.github.drtron1c.cloudphotos.photos.LocalCopies
 import io.github.drtron1c.cloudphotos.photos.LibraryIndex
 import io.github.drtron1c.cloudphotos.photos.MediaList
 import io.github.drtron1c.cloudphotos.photos.SharedAlbum
@@ -119,6 +120,30 @@ sealed interface GridEntry {
 
 /** A month or year card in the Months / Years views. */
 data class Period(val key: String, val title: String, val subtitle: String, val first: Int, val last: Int, val cover: Int)
+
+/** Export: either [assets], or all of [list]. */
+class ExportRequest(val title: String, val assets: List<Asset>, val list: MediaList?) {
+    val size get() = if (assets.isNotEmpty()) assets.size else list?.count ?: 0
+}
+
+/** Marks drags that start in Cloud Photos (so dropping them back in doesn't re-upload). */
+val DRAG_FROM_HERE = Any()
+
+/** The photo's thumbnail under your finger while dragging it to another app. */
+class ThumbShadow(view: android.view.View, private val bmp: Bitmap) : android.view.View.DragShadowBuilder(view) {
+    private val side = (view.resources.displayMetrics.density * 120).toInt()
+    private val w = if (bmp.width >= bmp.height) side else side * bmp.width / bmp.height.coerceAtLeast(1)
+    private val h = if (bmp.height >= bmp.width) side else side * bmp.height / bmp.width.coerceAtLeast(1)
+
+    override fun onProvideShadowMetrics(outShadowSize: android.graphics.Point, outShadowTouchPoint: android.graphics.Point) {
+        outShadowSize.set(w.coerceAtLeast(1), h.coerceAtLeast(1))
+        outShadowTouchPoint.set(w / 2, h / 2)
+    }
+
+    override fun onDrawShadow(canvas: android.graphics.Canvas) {
+        canvas.drawBitmap(bmp, null, android.graphics.Rect(0, 0, w, h), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+    }
+}
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = (app as CloudPhotosApp).graph
@@ -216,10 +241,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Start-up first: it brings the VPN up (if set) before anything else goes online.
         viewModelScope.launch { startup() }
         updates.checkOnLaunch()
-        if (settings.aiSearch) {
-            viewModelScope.launch { smart.index() }
+        if (settings.aiSearch || settings.aiPeople || settings.aiText) {
+            viewModelScope.launch { smart.index(); vision.load() }
             SmartIndexWorker.start(getApplication(), settings)
         }
+        io.github.drtron1c.cloudphotos.settings.AppShortcuts.publish(getApplication())
+        if (settings.memoriesNotify) io.github.drtron1c.cloudphotos.memories.OnThisDayWorker.schedule(getApplication(), true)
         viewModelScope.launch {
             CustomLauncher.events.collect {
                 toast(it)
@@ -595,37 +622,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * with on-device AI search on, the words are matched against what's in the pictures.
      */
     fun runSearch(query: String) {
-        val m = SearchQuery.parse(query) ?: return
+        var m = SearchQuery.parse(query) ?: return
         if (!indexMatchesLibrary) {
             toast("Still organising your library… ${(index.progress * 100).toInt()}%")
             return
         }
-        val byName = index.entries.count { m.matches(it, zoneId) }
-        if (!m.hasPhrase || byName > 0 || !smartReady) {
-            search(query)?.let { openList(it) }
-            if (byName == 0 && m.hasPhrase && settings.aiSearch && !smartReady) {
+        // A person's name ("Anna beach 2025") narrows the search to their photos.
+        var personIds: Set<String>? = null
+        var personName: String? = null
+        if (settings.aiPeople && m.hasPhrase) {
+            val words = m.phrase.split(" ")
+            for (p in people.filter { it.person.name.isNotBlank() }) {
+                val name = p.person.name.lowercase()
+                val first = name.substringBefore(' ')
+                val hit = when {
+                    m.phrase.contains(name) -> name
+                    first.length >= 3 && first in words -> first
+                    else -> null
+                }
+                if (hit != null) {
+                    personIds = p.assetIds.toSet()
+                    personName = p.person.name
+                    SearchQuery.parse(query.lowercase().replace(hit, " "))?.let { m = it }
+                    break
+                }
+            }
+        }
+        val title = query.trim()
+        if (personIds != null && !m.hasPhrase) {
+            val ids = personIds
+            virtualList("search:" + title.lowercase(), title, "search") { it.id in ids && m.matchesFilters(it, zoneId) }?.let { openList(it) }
+            return
+        }
+        val byName = index.entries.count { m.matches(it, zoneId) && (personIds == null || it.id in personIds) }
+        val textReady = settings.aiText && vision.textDone.value > 0
+        if (!m.hasPhrase || byName > 0 || (!smartReady && !textReady)) {
+            val ids = personIds
+            virtualList("search:" + title.lowercase(), title, "search") { m.matches(it, zoneId) && (ids == null || it.id in ids) }?.let { openList(it) }
+            if (byName == 0 && m.hasPhrase && (settings.aiSearch || settings.aiText) && !smartReady && !textReady) {
                 toast("On-device AI search is still getting ready — see Settings › Smart Search")
             }
             return
         }
+        val phrase = m.phrase
         viewModelScope.launch {
             busy = "Searching…"
             try {
                 // Only the visible library: the index never contains Hidden or Recently Deleted items.
-                val candidates = index.entries.filter { m.matchesFilters(it, zoneId) }.map { it.id }
-                val (ranked, confident) = smart.rank(m.phrase, candidates)
+                val candidates = index.entries.filter { m.matchesFilters(it, zoneId) && (personIds == null || it.id in personIds) }.map { it.id }
+                // Words written in the photo (signs, documents, screenshots) come first…
+                val byText = if (textReady) withContext(Dispatchers.Default) { vision.searchText(phrase, candidates) } else emptyList()
+                // …then what the picture shows.
+                val (ranked, confident) = if (smartReady) smart.rank(phrase, candidates) else emptyList<Pair<String, Float>>() to false
                 busy = null
-                if (ranked.isEmpty()) {
-                    toast("Nothing found for “${query.trim()}”")
+                val order = LinkedHashMap<String, Int>()
+                byText.forEach { order.putIfAbsent(it, order.size) }
+                ranked.forEach { order.putIfAbsent(it.first, order.size) }
+                if (order.isEmpty()) {
+                    toast("Nothing found for “$title”")
                     return@launch
                 }
-                val score = ranked.withIndex().associate { it.value.first to it.index }
                 val list = virtualList(
-                    "smart:" + query.trim().lowercase(), query.trim(), "search",
-                    order = { matches -> matches.sortedBy { score[it.value.id] ?: Int.MAX_VALUE } },
-                ) { it.id in score }
+                    "smart:" + title.lowercase(), title, "search",
+                    order = { matches -> matches.sortedBy { order[it.value.id] ?: Int.MAX_VALUE } },
+                ) { it.id in order }
                 if (list != null) {
-                    if (!confident) toast("No clear matches — showing the closest photos")
+                    if (!confident && byText.isEmpty()) toast("No clear matches — showing the closest photos")
+                    else if (personName != null) toast("Photos of $personName")
                     openList(list)
                 }
             } catch (e: CancellationException) {
@@ -1008,8 +1071,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun delete(assets: List<Asset>, done: () -> Unit = {}) = batch(assets, {
         removeEverywhere(assets, except = AlbumSpec.RECENTLY_DELETED)
         index.remove(assets.map { it.id }.toSet())
-        // Smart Search never keeps or searches anything in Recently Deleted.
-        viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()) }
+        // Smart Search, People and Text never keep or search anything in Recently Deleted.
+        viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()); vision.forget(assets.map { it.id }.toSet()) }
         listFor(AlbumSpec.RECENTLY_DELETED)?.refresh()
         done()
     }) { a -> graph.photos.setDeleted(a, true) }
@@ -1025,7 +1088,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             removeEverywhere(assets, except = AlbumSpec.HIDDEN)
             index.remove(assets.map { it.id }.toSet())
             // …or in Hidden.
-            viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()) }
+            viewModelScope.launch { smart.forget(assets.map { it.id }.toSet()); vision.forget(assets.map { it.id }.toSet()) }
             listFor(AlbumSpec.HIDDEN)?.refresh()
         } else {
             listFor(AlbumSpec.HIDDEN)?.removeAll(assets.map { it.id }.toSet())
@@ -1107,7 +1170,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 busy = "Preparing…"
-                val intent = graph.media.shareIntent(assets) { i, n ->
+                val intent = graph.media.shareIntent(assets, compatible = settings.shareCompatible) { i, n ->
                     busy = if (n == 1) "Preparing…" else "Preparing ${i + 1} of $n…"
                 }
                 busy = null
@@ -1120,6 +1183,456 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 toast(friendly(e))
             }
         }
+    }
+
+    // ---------------- collections: memories, people & pets, places, similar ----------------
+
+    val vision get() = graph.vision
+    private val geo by lazy { io.github.drtron1c.cloudphotos.places.Geo.get(getApplication()) }
+
+    /** Library rank of each photo id (for covers and thumbnails of computed collections). */
+    private var rankCache: Pair<List<IndexEntry>, Map<String, Int>>? = null
+    private fun rankOf(id: String): Int? {
+        val e = index.entries
+        val c = rankCache?.takeIf { it.first === e } ?: (e to e.withIndex().associate { it.value.id to it.index }).also { rankCache = it }
+        return c.second[id]
+    }
+
+    /** The library item with this id (loads its page if needed; null until it arrives). */
+    fun assetFor(id: String): Asset? {
+        val lib = library() ?: return null
+        val rank = rankOf(id) ?: return null
+        val pos = lib.positionOfRank(rank)
+        return lib[pos] ?: run { lib.ensure(pos); null }
+    }
+
+    /** A grid of these photos: in this order ([keepOrder]) or the library's. */
+    fun idsList(key: String, title: String, ids: List<String>, icon: String = "photo", keepOrder: Boolean = true): MediaList? {
+        val order = ids.withIndex().associate { it.value to it.index }
+        return virtualList(key, title, icon, order = if (keepOrder) { m -> m.sortedBy { order[it.value.id] ?: Int.MAX_VALUE } } else null) { it.id in order }
+    }
+
+    var memories by mutableStateOf<List<io.github.drtron1c.cloudphotos.memories.Memory>>(emptyList())
+        private set
+    var memoriesLoading by mutableStateOf(false)
+        private set
+    private var memoriesFor: Any? = null
+
+    /** (Re)builds memories when the library changed. All on the device. */
+    fun refreshMemories(force: Boolean = false) {
+        if (!indexMatchesLibrary) return
+        val entries = index.entries
+        val key = entries to people.size
+        if (!force && memoriesFor == key) return
+        memoriesFor = key
+        memoriesLoading = true
+        viewModelScope.launch {
+            val ppl = people.filter { it.person.name.isNotBlank() }.map { it.person.name to it.assetIds }
+            val petsNow = pets
+            memories = withContext(Dispatchers.Default) {
+                runCatching {
+                    io.github.drtron1c.cloudphotos.memories.MemoryMaker.make(entries, LocalDate.now(zoneId), zoneId, geo, ppl, petsNow)
+                }.getOrDefault(emptyList())
+            }
+            memoriesLoading = false
+        }
+    }
+
+    /** Memories made on the spot (a person's photos, a place…). */
+    private val extraMemories = HashMap<String, io.github.drtron1c.cloudphotos.memories.Memory>()
+
+    fun memoryById(id: String) = memories.firstOrNull { it.id == id } ?: extraMemories[id]
+
+    fun playAsMemory(title: String, subtitle: String, ids: List<String>) {
+        val set = ids.toSet()
+        val group = index.entries.filter { it.id in set }
+        val picked = io.github.drtron1c.cloudphotos.memories.MemoryMaker.pick(group, 45)
+        if (picked.isEmpty()) { toast("No photos to show"); return }
+        val m = io.github.drtron1c.cloudphotos.memories.Memory(
+            "adhoc:" + title + ":" + ids.size, title, subtitle, "person", picked.map { it.id }, picked[picked.size / 3].id, picked.first().date,
+        )
+        extraMemories[m.id] = m
+        playMemory(m)
+    }
+    fun memoryList(m: io.github.drtron1c.cloudphotos.memories.Memory): MediaList? = idsList("memory:" + m.id, m.title, m.ids, "onthisday")
+
+    fun playMemory(m: io.github.drtron1c.cloudphotos.memories.Memory) {
+        if (memoryList(m) == null) { toast("Still organising your library…"); return }
+        open(Route.MemoryPlayer(m.id))
+    }
+
+    fun setMemoriesNotify(on: Boolean) {
+        settings.memoriesNotify = on
+        io.github.drtron1c.cloudphotos.memories.OnThisDayWorker.schedule(getApplication(), on)
+    }
+
+    // People & Pets
+
+    var people by mutableStateOf<List<io.github.drtron1c.cloudphotos.ai.PersonPhotos>>(emptyList())
+        private set
+    var pets by mutableStateOf<Map<String, List<String>>>(emptyMap())
+        private set
+    var peopleLoading by mutableStateOf(false)
+        private set
+
+    fun refreshPeople() {
+        if (!indexMatchesLibrary) return
+        val visible = index.entries.map { it.id }.toSet()
+        peopleLoading = true
+        viewModelScope.launch {
+            try {
+                if (settings.aiPeople) people = vision.people(visible)
+                if (settings.aiSearch && smartReady) pets = smart.pets(index.entries.filter { !it.video }.map { it.id })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't group faces: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                peopleLoading = false
+            }
+        }
+    }
+
+    fun personList(id: String): MediaList? {
+        val p = people.firstOrNull { it.person.id == id } ?: return null
+        return idsList("person:$id", p.person.name.ifBlank { "Person" }, p.assetIds, "people", keepOrder = false)
+    }
+
+    fun petList(kind: String): MediaList? {
+        val ids = pets[kind] ?: return null
+        return idsList("pets:$kind", if (kind == "dogs") "Dogs" else "Cats", ids, "people", keepOrder = false)
+    }
+
+    fun renamePerson(id: String, name: String) {
+        viewModelScope.launch { vision.rename(id, name); refreshPeople(); memoriesFor = null }
+    }
+
+    fun mergePeople(into: String, other: String) {
+        viewModelScope.launch { vision.merge(into, other); refreshPeople() }
+    }
+
+    fun hidePerson(id: String) {
+        viewModelScope.launch { vision.hide(id); refreshPeople(); toast("They won't be shown in People") }
+    }
+
+    fun namesIn(assetId: String): List<String> = if (settings.aiPeople) vision.namesIn(assetId) else emptyList()
+
+    fun setAiPeople(on: Boolean) {
+        settings.aiPeople = on
+        restartAnalysis()
+    }
+
+    fun setAiText(on: Boolean) {
+        settings.aiText = on
+        restartAnalysis()
+    }
+
+    private fun restartAnalysis() {
+        val app = getApplication<Application>()
+        SmartIndexWorker.stop(app)
+        if (settings.aiSearch || settings.aiPeople || settings.aiText) SmartIndexWorker.start(app, settings)
+    }
+
+    fun deletePeopleData() {
+        settings.aiPeople = false
+        vision.deleteFaces()
+        people = emptyList()
+        restartAnalysis()
+        toast("Faces and names deleted from this device")
+    }
+
+    fun deleteTextData() {
+        settings.aiText = false
+        vision.deleteText()
+        restartAnalysis()
+        toast("Text from photos deleted from this device")
+    }
+
+    /** Live Text: the words in this photo (read now if it hasn't been yet). On the device only. */
+    fun readText(asset: Asset, onResult: (List<String>) -> Unit) {
+        viewModelScope.launch {
+            vision.load()
+            vision.textOf(asset.id)?.let { onResult(it); return@launch }
+            if (!vision.textPack.present()) {
+                if (offlineMode) { toast("The text reader isn't downloaded yet"); return@launch }
+                busy = "Getting the text reader (${megabytes(vision.textPack.downloadSize)}, once)…"
+                val ok = vision.textPack.download(http)
+                busy = null
+                if (!ok) { toast("Couldn't download the text reader"); return@launch }
+            }
+            busy = "Reading text…"
+            try {
+                val v = asset.edited ?: asset.medium ?: asset.thumbnail
+                val bytes = withContext(Dispatchers.IO) {
+                    val local = v?.let { model(it) } as? File
+                    local?.readBytes() ?: v?.let { ver ->
+                        imageLoader.diskCache?.openSnapshot(ver.checksum)?.use { File(it.data.toString()).readBytes() }
+                            ?: http.newCall(okhttp3.Request.Builder().url(ver.url).build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+                    }
+                }
+                val lines = bytes?.let { b -> withContext(Dispatchers.Default) { vision.readNow(asset.id, b) } }
+                busy = null
+                if (lines == null) toast("Couldn't read this photo") else {
+                    onResult(lines)
+                    if (settings.aiText) vision.save()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                busy = null
+                toast("Couldn't read the text: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    // Places
+
+    class PlaceGroup(val label: String, val ids: List<String>, val lat: Double, val lon: Double)
+
+    var places by mutableStateOf<List<PlaceGroup>>(emptyList())
+        private set
+    private var placesFor: Any? = null
+
+    /** Photos with a location, grouped by town (offline place names). */
+    fun refreshPlaces() {
+        if (!indexMatchesLibrary) return
+        val entries = index.entries
+        if (placesFor === entries) return
+        placesFor = entries
+        viewModelScope.launch {
+            places = withContext(Dispatchers.Default) {
+                entries.filter { it.lat != null && it.lon != null && !(it.lat == 0.0 && it.lon == 0.0) }
+                    .groupBy { geo.label(it.lat!!, it.lon!!) ?: "Elsewhere" }
+                    .map { (label, list) -> PlaceGroup(label, list.map { it.id }, list.map { it.lat!! }.average(), list.map { it.lon!! }.average()) }
+                    .sortedByDescending { it.ids.size }
+            }
+        }
+    }
+
+    fun mapPoints(): List<io.github.drtron1c.cloudphotos.places.MapPoint> =
+        index.entries.filter { it.lat != null && it.lon != null && !(it.lat == 0.0 && it.lon == 0.0) }
+            .map { io.github.drtron1c.cloudphotos.places.MapPoint(it.id, it.lat!!, it.lon!!) }
+
+    fun placeLabel(lat: Double, lon: Double): String? = runCatching { geo.label(lat, lon) }.getOrNull()
+
+    // Similar photos
+
+    var similar by mutableStateOf<List<List<String>>?>(null)
+        private set
+
+    fun refreshSimilar() {
+        if (!indexMatchesLibrary || !smartReady) return
+        viewModelScope.launch {
+            val ordered = index.entries.filter { !it.video }.sortedBy { it.date }.map { it.id to it.date }
+            similar = smart.similarGroups(ordered)
+        }
+    }
+
+    /** Best of a group to keep: favourite, then edited, then the biggest file, then the first taken. */
+    fun bestOf(ids: List<String>): String {
+        val byId = index.entries.associateBy { it.id }
+        return ids.maxWith(compareBy<String>({ byId[it]?.favourite == true }, { byId[it]?.edited == true }, { byId[it]?.size ?: 0L }, { -(byId[it]?.date ?: 0L) }))
+    }
+
+    /** Delete by id (Similar Photos clean-up): moved to Recently Deleted, like the iPhone. */
+    fun deleteIds(ids: Collection<String>, done: () -> Unit = {}) {
+        val assets = ids.mapNotNull { assetFor(it) }
+        if (assets.size < ids.size) { toast("Still loading those photos — try again in a moment"); return }
+        delete(assets) {
+            similar = similar?.map { g -> g.filter { it !in ids } }?.filter { it.size >= 2 }
+            done()
+        }
+    }
+
+    // Trim
+
+    /** Saves the part of a video between [startMs] and [endMs] as a new clip (to iCloud, or this device). */
+    fun trimVideo(asset: Asset, startMs: Long, endMs: Long, done: () -> Unit) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            busy = "Downloading the video…"
+            val dir = File(app.cacheDir, "trim").apply { mkdirs() }
+            var input: File? = null
+            var output: File? = null
+            try {
+                input = graph.media.downloadCurrent(asset, dir, compatible = false)
+                output = File(dir, asset.filename.substringBeforeLast('.') + "_trim.MP4")
+                VideoTrimmer.trim(app, input, output, startMs, endMs) { p -> busy = "Trimming… ${(p * 100).toInt()}%" }
+                if (canUpload) {
+                    busy = "Adding to your library…"
+                    graph.photos.upload(output, output.name, asset.date + startMs)
+                    busy = null
+                    toast("Saved as a new video — it'll appear in your library shortly")
+                    afterUpload(1)
+                } else {
+                    busy = "Saving…"
+                    withContext(Dispatchers.IO) { VideoTrimmer.saveToGallery(app, output, asset.date + startMs) }
+                    busy = null
+                    toast("Saved to Gallery › Cloud Photos")
+                }
+                done()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                busy = null
+                toast("Couldn't trim the video: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                busy = null
+                input?.delete()
+                output?.delete()
+            }
+        }
+    }
+
+    // ---------------- copy, drag & drop, frames, export ----------------
+
+    /** Ctrl+C / Copy: the photo on the clipboard, ready to paste into another app. */
+    fun copyToClipboard(asset: Asset) {
+        val app = getApplication<Application>()
+        fun put(uri: Uri, name: String) {
+            val cm = app.getSystemService(android.content.ClipboardManager::class.java) ?: return
+            cm.setPrimaryClip(android.content.ClipData.newUri(app.contentResolver, name, uri))
+            toast("Copied")
+        }
+        val cached = if (!asset.isVideo) LocalCopies.cachedCopy(app, imageLoader, asset) { model(it) } else null
+        if (cached != null) {
+            put(cached.first, asset.filename); return
+        }
+        if (offlineMode) { toast("Not available offline"); return }
+        viewModelScope.launch {
+            busy = "Preparing…"
+            try {
+                val dir = File(app.cacheDir, "drag").apply { mkdirs() }
+                val file = graph.media.downloadCurrent(asset, dir, settings.shareCompatible)
+                put(androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", file), file.name)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast(friendly(e))
+            } finally {
+                busy = null
+            }
+        }
+    }
+
+    /** Long-press drags the photo out when another app is on screen too (split screen, floating window). */
+    fun canDragOut(context: android.content.Context): Boolean =
+        context.findActivity()?.isInMultiWindowMode == true
+
+    fun startDragOut(view: android.view.View, asset: Asset) {
+        val app = getApplication<Application>()
+        val copy = LocalCopies.cachedCopy(app, imageLoader, asset) { model(it) }
+        if (copy == null) { toast("Still loading — try again in a moment"); return }
+        val clip = android.content.ClipData(
+            android.content.ClipDescription(asset.filename, arrayOf(copy.second)),
+            android.content.ClipData.Item(copy.first),
+        )
+        val thumb = asset.thumbnail?.let { imageLoader.memoryCache?.get(coil3.memory.MemoryCache.Key(it.checksum))?.image }
+        val bmp = (thumb as? coil3.BitmapImage)?.bitmap
+        val shadow = if (bmp != null) ThumbShadow(view, bmp) else android.view.View.DragShadowBuilder(view)
+        val flags = android.view.View.DRAG_FLAG_GLOBAL or android.view.View.DRAG_FLAG_GLOBAL_URI_READ
+        if (!view.startDragAndDrop(clip, shadow, DRAG_FROM_HERE, flags)) toast("Couldn't start dragging")
+    }
+
+    /** Photos dropped onto the app from another app go to iCloud. */
+    fun onDrop(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        if (!canUpload) { toast("Uploading isn't available right now"); return }
+        upload(uris)
+    }
+
+    /** Save the frame on screen as a photo (to this device, or to your iCloud library). */
+    fun saveFrame(asset: Asset, frame: Bitmap, positionMs: Long, toLibrary: Boolean) {
+        val app = getApplication<Application>()
+        val base = asset.filename.substringBeforeLast('.')
+        val name = "${base}_frame_${positionMs / 1000}s.JPG"
+        val taken = if (asset.date > 0) asset.date + positionMs else System.currentTimeMillis()
+        viewModelScope.launch {
+            busy = "Saving frame…"
+            try {
+                if (toLibrary) {
+                    val dir = File(app.cacheDir, "frames").apply { mkdirs() }
+                    val file = File(dir, name)
+                    withContext(Dispatchers.IO) { file.outputStream().use { frame.compress(Bitmap.CompressFormat.JPEG, 95, it) } }
+                    try {
+                        graph.photos.upload(file, name, taken)
+                    } finally {
+                        file.delete()
+                    }
+                    busy = null
+                    toast("Frame added to your library")
+                    afterUpload(1)
+                } else {
+                    withContext(Dispatchers.IO) { LocalCopies.saveBitmapToGallery(app, frame, name, taken) }
+                    toast("Frame saved to Gallery › Cloud Photos")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                handleError(e)
+            } finally {
+                busy = null
+                frame.recycle()
+            }
+        }
+    }
+
+    /** Waiting for the folder picker: what to export and in which format. */
+    var exportRequest by mutableStateOf<ExportRequest?>(null)
+
+    fun exportAssets(assets: List<Asset>, title: String) {
+        if (assets.isEmpty()) return
+        exportRequest = ExportRequest(title, assets, null)
+    }
+
+    fun exportAll(list: MediaList) {
+        exportRequest = ExportRequest(list.spec.title, emptyList(), list)
+    }
+
+    /** Folder picked: copy everything there, one at a time (keep the app open for big exports). */
+    fun runExport(request: ExportRequest, tree: Uri, compatible: Boolean) {
+        exportRequest = null
+        viewModelScope.launch {
+            try {
+                val assets = request.assets.ifEmpty {
+                    uploadStatus = "Getting ${request.title} ready…"
+                    loadAll(request.list ?: return@launch)
+                }
+                var done = 0
+                var failed = 0
+                assets.forEachIndexed { i, a ->
+                    uploadStatus = "Exporting ${i + 1} of ${assets.size}…"
+                    try {
+                        graph.media.exportTo(tree, a, compatible)
+                        done++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        failed++
+                        if (failed == 1) toast("${a.filename}: ${friendly(e)}")
+                    }
+                }
+                toast(if (failed == 0) "Exported $done items" else "Exported $done items · $failed couldn't be exported")
+            } finally {
+                uploadStatus = null
+            }
+        }
+    }
+
+    /** Every item of a list (loading the pages it hasn't fetched yet). */
+    private suspend fun loadAll(list: MediaList): List<Asset> {
+        val out = ArrayList<Asset>()
+        var waited = 0
+        while (list.count < 0 && waited < 300) { delay(100); waited++ }
+        for (i in 0 until list.count.coerceAtLeast(0)) {
+            var a = list[i]
+            var tries = 0
+            while (a == null && tries < 200) {
+                list.ensure(i); delay(50); tries++; a = list[i]
+            }
+            if (a != null) out += a
+        }
+        return out
     }
 
     fun upload(uris: List<Uri>) {

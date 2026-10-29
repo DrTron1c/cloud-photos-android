@@ -2,7 +2,8 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    # dev: same build and tests, but nothing is published.
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -132,6 +133,7 @@ jobs:
 
       # A rolling "latest" release makes the APK one tap to download on the tablet.
       - name: Publish rolling release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -164,13 +166,13 @@ jobs:
           mkdir -p test-results && cp -r "$GITHUB_WORKSPACE"/app/build/test-results/* test-results/ 2>/dev/null || true
           git add -A
           git -c user.name=ci -c user.email=ci@localhost commit -qm "CI run ${{ github.run_number }}"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name == 'main' && 'ci-logs' || 'ci-logs-dev' }}
 
   # Opens the new APK on an Android emulator to catch start-up crashes before you install it.
   smoke:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -194,7 +196,8 @@ jobs:
       - name: Push smoke results
         if: always()
         run: |
-          git fetch -q origin ci-logs
+          B=${{ github.ref_name == 'main' && 'ci-logs' || 'ci-logs-dev' }}
+          git fetch -q origin $B
           git worktree add -q --detach /tmp/ci FETCH_HEAD
           cd /tmp/ci
           rm -rf smoke
@@ -202,4 +205,4 @@ jobs:
           echo "${{ job.status }} run=${{ github.run_number }}" > smoke/status.txt
           git add -A
           git -c user.name=ci -c user.email=ci@localhost commit -qm "Smoke ${{ github.run_number }}" || true
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:ci-logs
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:$B

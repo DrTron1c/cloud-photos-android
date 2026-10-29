@@ -1,5 +1,17 @@
 # Cloud Photos change log
 
+## Build 24 · Memories, People & Pets, Places and big-screen mode
+- **Memories** — trips, big days, seasons, years and On This Day, made on this device, played with music (three built-in tracks or your own song). Optional morning **On This Day** reminder.
+- **People & Pets** — faces found and grouped on the device; name people, merge, hide. Search “Anna beach 2025”. Dogs and cats found by Smart Search.
+- **Text in photos** — read signs, documents and screenshots: search their words, or tap **T** in a photo to copy the text.
+- **Places** — photos grouped by town (named offline), with an optional OpenStreetMap map.
+- **Similar Photos** — bursts and retakes grouped so you can keep the best and clear the rest.
+- **Zoom** — zoom much further into photos and videos; photos load full-resolution detail as you zoom, and videos zoom at their own resolution.
+- **Videos** — picture-in-picture, playback speed, save a frame, trim to a new clip.
+- **Tablets** — iPad-style sidebar, photos open beside the grid, highest refresh rate (e.g. 144 Hz), keyboard shortcuts (Ctrl+/), drag photos into other apps and drop photos in to upload.
+- **More** — export to any folder, share HEIC as JPEG, Quick Settings tile for Proton VPN, long-press app-icon shortcuts.
+- **Privacy** — all of this runs on the device; Hidden and Recently Deleted photos are never analysed, and anything learned about a photo is wiped when you hide or delete it.
+
 ## Build 21 · Smart Search, Liquid Glass, Proton VPN
 - **Smart Search (on-device AI)** — search what's in your photos, like “red hat late 2026” or “dog on a beach summer 2025”. A small AI model looks at your photos on this device; nothing about your photos or searches leaves it. Turn it on in Search or Settings › Smart Search.
 - **Date words in search** — “early / mid / late 2026”, seasons, “last month”, “this year”, “christmas”, “weekend” and decades like “2010s”.

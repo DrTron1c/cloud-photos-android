@@ -35,7 +35,7 @@ class CloudPhotosApp : Application() {
         graph = AppGraph(this)
         // Never leave shared / uploaded / edited copies lying around between sessions.
         Thread {
-            for (name in listOf("shared", "upload", "edit")) File(cacheDir, name).deleteRecursively()
+            for (name in listOf("shared", "upload", "edit", "drag", "export", "frames", "trim")) File(cacheDir, name).deleteRecursively()
         }.start()
     }
 }
@@ -78,6 +78,7 @@ class AppGraph(context: Context) {
     val vpn = VpnManager(context.applicationContext as Application, settings, scope) { Thread { http.connectionPool.evictAll() }.start() }
     val updates = UpdateManager(context.applicationContext as Application, http, settings, scope)
     val smart = SmartSearch(context.applicationContext, settings)
+    val vision = io.github.drtron1c.cloudphotos.ai.Vision(context.applicationContext)
 
     init {
         photos.zoneName = settings.zone
