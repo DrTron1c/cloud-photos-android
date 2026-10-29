@@ -564,7 +564,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val n = i - start
                 val title = if (byYear) d.year.toString() else d.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
                 val cover = if (settings.newestOnTop) start else i - 1
-                out += Period("${keyOf(dates[start])}", title, if (n == 1) "1 item" else "%,d items".format(n), start, i - 1, cover)
+                // Start index keeps keys unique even if a stray date splits a year/month in two.
+                out += Period("${keyOf(dates[start])}:$start", title, if (n == 1) "1 item" else "%,d items".format(n), start, i - 1, cover)
                 start = i
             }
         }
