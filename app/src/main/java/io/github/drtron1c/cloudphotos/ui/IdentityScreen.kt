@@ -367,7 +367,7 @@ fun IdentityScreen(vm: MainViewModel, onBack: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text("Hide the original icon", color = p.label, fontSize = 17.sp)
                         Text(
-                            "So only your version shows. It comes back by itself if you remove your app.",
+                            "So only your version shows (takes effect when you leave Cloud Photos). It comes back by itself if you remove your app.",
                             color = p.secondaryLabel, fontSize = 13.sp,
                         )
                     }

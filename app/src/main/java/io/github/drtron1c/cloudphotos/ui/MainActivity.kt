@@ -70,6 +70,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) vm.onBackgrounded()
+        if (!isChangingConfigurations) {
+            vm.applyLauncherChanges()
+            vm.onBackgrounded()
+        }
     }
 }

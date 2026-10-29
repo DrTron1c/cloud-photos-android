@@ -147,7 +147,7 @@ object CustomLauncher {
         val settings = (context.applicationContext as CloudPhotosApp).graph.settings
         val text = when (status) {
             PackageInstaller.STATUS_SUCCESS -> {
-                if (settings.hideOriginalIcon) AppIdentity.showOriginal(context, settings, false)
+                // Switching the original icon off happens when you leave the app (see MainActivity.onStop).
                 "“${installedLabel(context) ?: settings.customName}” is on your home screen"
             }
             PackageInstaller.STATUS_FAILURE_ABORTED -> "Install cancelled"
@@ -163,12 +163,12 @@ object CustomLauncher {
 
     /**
      * Never leave you without a way into the app: if the original icon is hidden but the
-     * companion app is gone, bring the original icon back.
+     * companion app is gone, bring the original icon back. With [appOpen], only switches
+     * entries on (Android may close an app whose open entry is switched off).
      */
-    fun reconcile(context: Context) {
+    fun reconcile(context: Context, appOpen: Boolean) {
         val settings = (context.applicationContext as CloudPhotosApp).graph.settings
-        if (!settings.hideOriginalIcon) return
-        AppIdentity.showOriginal(context, settings, !isInstalled(context))
+        if (appOpen) AppIdentity.showWanted(context, settings) else AppIdentity.applyAll(context, settings)
     }
 }
 
@@ -192,6 +192,6 @@ class InstallResultReceiver : BroadcastReceiver() {
 class LauncherWatcher : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_PACKAGE_FULLY_REMOVED && intent.data?.schemeSpecificPart != CustomLauncher.PACKAGE) return
-        CustomLauncher.reconcile(context)
+        CustomLauncher.reconcile(context, appOpen = false)
     }
 }

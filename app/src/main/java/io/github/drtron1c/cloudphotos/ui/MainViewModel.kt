@@ -1002,8 +1002,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (settings.hideOriginalIcon && CustomLauncher.isInstalled(ctx)) {
             toast("Saved — the original icon is hidden while your own app is installed")
         } else {
-            AppIdentity.setLauncherName(ctx, alias)
-            toast("App name changed — it can take a moment to update on your home screen")
+            AppIdentity.showWanted(ctx, settings)
+            toast("The new name shows on your home screen after you leave the app")
         }
     }
 
@@ -1075,15 +1075,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Uninstall prompt for the companion app; the original icon comes back first. */
     fun removeCompanionIntent(): Intent {
-        AppIdentity.showOriginal(getApplication(), settings, true)
+        AppIdentity.showOriginalNow(getApplication(), settings)
         expectingExternal = true
         return CustomLauncher.uninstallIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     fun setHideOriginal(on: Boolean) {
         settings.hideOriginalIcon = on
-        val ctx = getApplication<Application>()
-        if (CustomLauncher.isInstalled(ctx)) AppIdentity.showOriginal(ctx, settings, !on)
+        // Showing happens now; hiding when you leave the app.
+        AppIdentity.showWanted(getApplication(), settings)
     }
 
     fun pinIdentityShortcut(name: String, icon: Bitmap) {
@@ -1111,7 +1111,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun onResumed() {
         expectingExternal = false
         val ctx = getApplication<Application>()
-        CustomLauncher.reconcile(ctx)
+        CustomLauncher.reconcile(ctx, appOpen = true)
         refreshCompanion()
         // Came back from allowing installs: carry on with the companion app.
         val pending = pendingCompanion
@@ -1129,6 +1129,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (now - lastForegroundCheck < 3 * 60 * 1000L) return
         lastForegroundCheck = now
         lists.values.forEach { it.checkForChanges() }
+    }
+
+    /** Leaving the app (not just for a picker / installer): apply launcher icon changes now. */
+    fun applyLauncherChanges() {
+        if (!expectingExternal) AppIdentity.applyAll(getApplication(), settings)
     }
 
     fun onBackgrounded() {

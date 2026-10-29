@@ -15,6 +15,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.IconCompat
 import io.github.drtron1c.cloudphotos.R
+import io.github.drtron1c.cloudphotos.identity.CustomLauncher
 import io.github.drtron1c.cloudphotos.ui.MainActivity
 
 /** The app's name and icon on the home screen. */
@@ -28,12 +29,31 @@ object AppIdentity {
         applyAliases(context, alias)
     }
 
-    /**
-     * Show or hide the original Cloud Photos icon (used when your own companion app
-     * with a custom name and picture replaces it).
-     */
-    fun showOriginal(context: Context, settings: AppSettings, show: Boolean) {
-        applyAliases(context, if (show) settings.launcherName else null)
+    /** Which launcher entry should show (null = none, because your own app replaces it). */
+    fun desiredAlias(context: Context, settings: AppSettings): String? =
+        if (settings.hideOriginalIcon && CustomLauncher.isInstalled(context)) null else settings.launcherName
+
+    /** Switches on the entry that should show. Always safe, even while the app is open. */
+    fun showWanted(context: Context, settings: AppSettings) {
+        val alias = desiredAlias(context, settings) ?: return
+        setAlias(context, alias, true)
+    }
+
+    /** Brings every entry in line, including switching old ones off. */
+    fun applyAll(context: Context, settings: AppSettings) {
+        applyAliases(context, desiredAlias(context, settings))
+    }
+
+    /** Makes sure the original icon is there (e.g. before removing your own app). */
+    fun showOriginalNow(context: Context, settings: AppSettings) {
+        setAlias(context, settings.launcherName, true)
+    }
+
+    private fun setAlias(context: Context, alias: String, on: Boolean) {
+        val pm = context.packageManager
+        val component = ComponentName(context.packageName, "${context.packageName}.alias.$alias")
+        val want = if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        if (pm.getComponentEnabledSetting(component) != want) pm.setComponentEnabledSetting(component, want, PackageManager.DONT_KILL_APP)
     }
 
     /** Enables exactly the [alias] launcher entry (none when null). */
