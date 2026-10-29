@@ -1,0 +1,9 @@
+# Shrinking rules for the on-device test APK only.
+-dontobfuscate
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn org.junit.**
+-dontwarn org.hamcrest.**
+-keep class io.github.drtron1c.cloudphotos.** { *; }
+-keep class androidx.test.** { *; }
+-keep class org.junit.** { *; }
+-keep class junit.** { *; }
