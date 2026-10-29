@@ -69,8 +69,11 @@ fi
 TEST=app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
 if [ -f "$TEST" ]; then
   adb install -r "$TEST" 2>&1 | tee $OUT/test-install.txt
-  adb shell am instrument -w -e class io.github.drtron1c.cloudphotos.identity.CompanionOnDeviceTest \
+  adb logcat -c
+  timeout 240 adb shell am instrument -r -w -e class io.github.drtron1c.cloudphotos.identity.CompanionOnDeviceTest \
     io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
+  echo "exit=$?" >> $OUT/device-test.txt
+  adb logcat -d | grep -iE "TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err" | tail -150 > $OUT/device-test-logcat.txt
   adb pull /sdcard/Android/data/io.github.drtron1c.cloudphotos/files/device-made.apk $OUT/device-made.apk 2>&1 | tail -1
   if [ -f $OUT/device-made.apk ]; then
     adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
@@ -82,6 +85,14 @@ if [ -f "$TEST" ]; then
     rm -f $OUT/device-made.apk
   fi
 fi
+
+# Hiding the original icon while the app is open: does Android close the app?
+adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 5
+adb shell dumpsys activity activities | grep -E "topResumedActivity" | head -1 > $OUT/hide-before.txt
+adb shell pm disable $PKG/$PKG.alias.CloudPhotos >> $OUT/hide-before.txt 2>&1; sleep 4
+adb shell dumpsys activity activities | grep -E "topResumedActivity" | head -1 > $OUT/hide-after.txt
+shot 10-after-hiding-original
+adb shell pm enable $PKG/$PKG.alias.CloudPhotos > /dev/null 2>&1; sleep 2
 
 adb logcat -d -b crash > $OUT/crash.txt
 adb logcat -d | grep -E "AndroidRuntime|$PKG|FATAL|ANR" | tail -300 > $OUT/logcat.txt
