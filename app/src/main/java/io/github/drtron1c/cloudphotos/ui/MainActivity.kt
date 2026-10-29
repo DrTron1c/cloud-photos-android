@@ -136,7 +136,8 @@ class MainActivity : FragmentActivity(), PipHost {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         vm.inPip = isInPictureInPictureMode
-        if (isInPictureInPictureMode) vm.expectingExternal = true
+        // While floating, leaving doesn't lock the app; back to full screen, normal rules again.
+        vm.expectingExternal = isInPictureInPictureMode
     }
 
     /** Your own name and picture in the recent-apps list. */
