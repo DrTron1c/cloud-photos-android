@@ -16,7 +16,11 @@ android {
         targetSdk = 35
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+
+    // On-device tests run against the real (shrunk) release build.
+    testBuildType = "release"
 
     signingConfigs {
         create("shared") {
@@ -107,6 +111,10 @@ dependencies {
 
     // Signs the companion app on the device.
     implementation("com.android.tools.build:apksig:8.7.3")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("junit:junit:4.13.2")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

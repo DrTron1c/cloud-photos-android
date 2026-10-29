@@ -65,6 +65,24 @@ if [ -f "$COMP" ]; then
   adb shell input keyevent KEYCODE_HOME
 fi
 
+# Same thing made on the device itself (Android Keystore signing), via the on-device test.
+TEST=app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+if [ -f "$TEST" ]; then
+  adb install -r "$TEST" 2>&1 | tee $OUT/test-install.txt
+  adb shell am instrument -w -e class io.github.drtron1c.cloudphotos.identity.CompanionOnDeviceTest \
+    io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
+  adb pull /sdcard/Android/data/io.github.drtron1c.cloudphotos/files/device-made.apk $OUT/device-made.apk 2>&1 | tail -1
+  if [ -f $OUT/device-made.apk ]; then
+    adb uninstall io.github.drtron1c.cloudphotos.launcher > /dev/null 2>&1
+    adb install -r $OUT/device-made.apk 2>&1 | tee $OUT/device-made-install.txt
+    adb shell input keyevent KEYCODE_HOME; sleep 2
+    adb shell input swipe 540 2000 540 600 300; sleep 3
+    shot 9-app-drawer-device-made
+    adb shell input keyevent KEYCODE_HOME
+    rm -f $OUT/device-made.apk
+  fi
+fi
+
 adb logcat -d -b crash > $OUT/crash.txt
 adb logcat -d | grep -E "AndroidRuntime|$PKG|FATAL|ANR" | tail -300 > $OUT/logcat.txt
 if adb shell pidof $PKG > /dev/null; then echo "alive" > $OUT/result.txt; else echo "NOT RUNNING" > $OUT/result.txt; fi
