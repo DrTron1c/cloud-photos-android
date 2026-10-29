@@ -309,12 +309,14 @@ fun ViewerScreen(
                         onTrim = { vm.open(Route.Trim(list.key, page)) },
                         onKeyTarget = { if (pager.settledPage == page) videoKey = it },
                         onTap = { chrome = !chrome },
+                        onZoomIn = { chrome = false },
                     )
                     else -> PhotoPage(
                         vm = vm,
                         asset = asset,
                         liveTrigger = if (pager.currentPage == page) liveTrigger else 0,
                         onTap = { chrome = !chrome },
+                        onZoomIn = { chrome = false },
                         onLongPress = {
                             // Side by side with another app: long-press drags the photo into it.
                             if (vm.canDragOut(context)) vm.startDragOut(view, asset)
@@ -633,7 +635,7 @@ private fun TextInPhotoSheet(vm: MainViewModel, lines: List<String>) {
 }
 
 @Composable
-private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: () -> Unit, onLongPress: () -> Unit) {
+private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: () -> Unit, onZoomIn: () -> Unit, onLongPress: () -> Unit) {
     val context = LocalContext.current
     val image = asset.displayImage
     Box(Modifier.fillMaxSize()) {
@@ -654,7 +656,9 @@ private fun PhotoPage(vm: MainViewModel, asset: Asset, liveTrigger: Int, onTap: 
                 .build()
         }
         // Zoom far in; past the screen's resolution the full-size original is loaded in tiles.
-        val zoom = rememberZoomableImageState(rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM)))
+        val zoomable = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
+        val zoom = rememberZoomableImageState(zoomable)
+        HideBarsWhenZoomed(zoomable, onZoomIn)
         ZoomableAsyncImage(
             model = request,
             contentDescription = asset.filename,
@@ -719,6 +723,7 @@ private fun VideoPage(
     onTrim: () -> Unit,
     onKeyTarget: (((Int) -> Boolean)?) -> Unit,
     onTap: () -> Unit,
+    onZoomIn: () -> Unit,
 ) {
     val p = LocalPalette.current
     val s = vm.settings
@@ -804,6 +809,7 @@ private fun VideoPage(
             }
             // Pinch / double-tap to zoom the playing video, same gestures as photos.
             val zoom = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
+            HideBarsWhenZoomed(zoom, onZoomIn)
             LaunchedEffect(videoSize) {
                 zoom.setContentLocation(ZoomableContentLocation.scaledInsideAndCenterAligned(videoSize))
             }
@@ -860,6 +866,16 @@ private fun VideoPage(
     }
 }
 
+/** Zooming in clears the bars away (like iPhone); tap to bring them back. */
+@Composable
+private fun HideBarsWhenZoomed(state: me.saket.telephoto.zoomable.ZoomableState, onZoomIn: () -> Unit) {
+    val hide by rememberUpdatedState(onZoomIn)
+    LaunchedEffect(state) {
+        androidx.compose.runtime.snapshotFlow { (state.zoomFraction ?: 0f) > 0.02f }
+            .collect { zoomed -> if (zoomed) hide() }
+    }
+}
+
 private val SPEEDS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 private fun speedLabel(x: Float) = (if (x == x.toInt().toFloat()) x.toInt().toString() else x.toString().trimEnd('0')) + "×"
@@ -900,7 +916,7 @@ private fun VideoControls(
                 color = Color.White, strokeWidth = 3.dp,
             )
         }
-        AnimatedVisibility(visible = visible || !playing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
             Row(
                 Modifier
                     .padding(horizontal = 14.dp)
