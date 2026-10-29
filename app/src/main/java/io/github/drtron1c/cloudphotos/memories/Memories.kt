@@ -171,11 +171,19 @@ object MemoryMaker {
             spaced += e
         }
         if (spaced.size <= max) return spaced
-        val favs = spaced.filter { it.favourite }.take(max / 2)
+        // Evenly spread picks across a list.
+        fun spread(list: List<IndexEntry>, n: Int): List<IndexEntry> {
+            if (n <= 0 || list.isEmpty()) return emptyList()
+            if (list.size <= n) return list
+            val step = list.size.toDouble() / n
+            return (0 until n).map { list[minOf(list.lastIndex, (it * step).toInt())] }
+        }
+        val allFavs = spaced.filter { it.favourite }
         val rest = spaced.filter { !it.favourite }
-        val need = max - favs.size
-        val step = rest.size.toDouble() / need
-        val sampled = (0 until need).map { rest[min(rest.lastIndex, (it * step).toInt())] }
+        // Favourites get up to half the places — more when there's little else (a day of nothing but favourites).
+        val favCount = maxOf(minOf(allFavs.size, max / 2), max - rest.size).coerceAtMost(allFavs.size)
+        val favs = spread(allFavs, favCount)
+        val sampled = spread(rest, max - favs.size)
         return (favs + sampled).distinctBy { it.id }.sortedBy { it.date }
     }
 

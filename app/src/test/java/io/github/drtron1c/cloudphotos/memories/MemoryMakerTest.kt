@@ -77,4 +77,12 @@ class MemoryMakerTest {
         assertTrue(picked.zipWithNext().all { (a, b) -> a.date <= b.date })
         assertTrue(picked.first().date - group.first().date < 24 * 3_600_000L)
     }
+
+    @Test
+    fun aDayOfNothingButFavourites() {
+        val group = (0 until 300).map { photo(LocalDateTime.of(2025, 1, 1, 0, 0).plusMinutes(it * 10L), fav = true) }
+        val picked = MemoryMaker.pick(group, 45)
+        assertEquals(45, picked.size)
+        assertTrue(picked.last().date - picked.first().date > 40 * 3_600_000L)
+    }
 }
