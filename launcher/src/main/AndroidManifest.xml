@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Lets this app find and open Cloud Photos. -->
+    <queries>
+        <package android:name="io.github.drtron1c.cloudphotos" />
+    </queries>
+
+    <!-- The label below is replaced on the device with the name you type. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/launcher_icon"
+        android:roundIcon="@drawable/launcher_icon"
+        android:label="CloudPhotosCustomLauncherNamePlaceholder">
+        <activity
+            android:name=".LaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

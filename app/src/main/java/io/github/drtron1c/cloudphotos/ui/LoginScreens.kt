@@ -122,7 +122,7 @@ fun LoginScreen(state: Phase.Login, vm: MainViewModel, onSignIn: (String, String
     CenteredColumn {
         AppIcon(88.dp)
         Spacer(Modifier.height(20.dp))
-        Text("Cloud Photos", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = p.label)
+        Text(vm.settings.appName, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = p.label)
         Spacer(Modifier.height(8.dp))
         Text(
             "Sign in with your Apple Account to see your iCloud Photos library.",
@@ -350,13 +350,13 @@ fun FailedScreen(message: String, vm: MainViewModel, onRetry: () -> Unit, onSign
 }
 
 @Composable
-fun LockScreen(onUnlock: () -> Unit) {
+fun LockScreen(appName: String, onUnlock: () -> Unit) {
     val p = LocalPalette.current
     Box(Modifier.fillMaxSize().background(p.background), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.Lock, null, tint = p.secondaryLabel, modifier = Modifier.size(48.dp))
             Spacer(Modifier.height(16.dp))
-            Text("Cloud Photos is locked", color = p.label, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text("$appName is locked", color = p.label, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(16.dp))
             Button(onClick = onUnlock, shape = RoundedCornerShape(14.dp)) { Text("Unlock") }
         }

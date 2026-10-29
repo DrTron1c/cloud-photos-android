@@ -49,6 +49,22 @@ adb shell settings put system user_rotation 0; sleep 3
 adb shell input keyevent KEYCODE_HOME; sleep 3
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 6; shot 6-reopened
 
+# Companion app made from the template (name "AAA My Photos", teal picture): install, open, and
+# check it shows in the app drawer and opens Cloud Photos.
+COMP=app/build/launcher-test/CustomLauncher.apk
+if [ -f "$COMP" ]; then
+  adb install -r "$COMP" 2>&1 | tee $OUT/companion-install.txt
+  adb shell dumpsys package io.github.drtron1c.cloudphotos.launcher | grep -iE "versionCode|signatures|launcher" | head -5 > $OUT/companion-package.txt
+  adb shell input keyevent KEYCODE_HOME; sleep 2
+  adb shell monkey -p io.github.drtron1c.cloudphotos.launcher -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1; sleep 6
+  adb shell dumpsys activity activities | grep -E "topResumedActivity|ResumedActivity" | head -3 > $OUT/companion-opened.txt
+  shot 7-opened-from-companion
+  adb shell input keyevent KEYCODE_HOME; sleep 2
+  adb shell input swipe 540 2000 540 600 300; sleep 3
+  shot 8-app-drawer
+  adb shell input keyevent KEYCODE_HOME
+fi
+
 adb logcat -d -b crash > $OUT/crash.txt
 adb logcat -d | grep -E "AndroidRuntime|$PKG|FATAL|ANR" | tail -300 > $OUT/logcat.txt
 if adb shell pidof $PKG > /dev/null; then echo "alive" > $OUT/result.txt; else echo "NOT RUNNING" > $OUT/result.txt; fi

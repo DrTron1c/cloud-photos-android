@@ -1,5 +1,7 @@
 package io.github.drtron1c.cloudphotos.ui
 
+import android.app.ActivityManager
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -9,6 +11,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.fragment.app.FragmentActivity
+import io.github.drtron1c.cloudphotos.identity.CustomLauncher
+import io.github.drtron1c.cloudphotos.identity.IconArt
 
 class MainActivity : FragmentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -27,8 +31,20 @@ class MainActivity : FragmentActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
             LaunchedEffect(s.hideInRecents) { applyRecentsPrivacy(s.hideInRecents) }
+            LaunchedEffect(s.customName, vm.identityVersion) { applyTaskIdentity(s.customName.trim()) }
             CloudPhotosTheme(themeMode = s.themeMode, accentIndex = s.accent) { AppRoot(vm) }
         }
+    }
+
+    /** Your own name and picture in the recent-apps list. */
+    private fun applyTaskIdentity(name: String) {
+        if (name.isEmpty()) return
+        val icon = CustomLauncher.savedIcon(this)?.let {
+            val inset = (IconArt.SIZE - IconArt.VISIBLE) / 2
+            Bitmap.createBitmap(it, inset, inset, IconArt.VISIBLE, IconArt.VISIBLE)
+        }
+        @Suppress("DEPRECATION")
+        setTaskDescription(ActivityManager.TaskDescription(name, icon))
     }
 
     /** Keep photos out of the app-switcher thumbnail. */

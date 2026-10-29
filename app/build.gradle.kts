@@ -58,7 +58,18 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/launcherTemplate"))
 }
+
+// The companion-app template (see :launcher) travels inside Cloud Photos as an asset.
+val copyLauncherTemplate = tasks.register<Copy>("copyLauncherTemplate") {
+    dependsOn(":launcher:assembleRelease")
+    from(rootProject.layout.projectDirectory.file("launcher/build/outputs/apk/release/launcher-release-unsigned.apk"))
+    into(layout.buildDirectory.dir("generated/launcherTemplate"))
+    rename { "launcher-template.apk" }
+}
+tasks.named("preBuild") { dependsOn(copyLauncherTemplate) }
+tasks.withType<Test>().configureEach { dependsOn(copyLauncherTemplate) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -93,6 +104,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+
+    // Signs the companion app on the device.
+    implementation("com.android.tools.build:apksig:8.7.3")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

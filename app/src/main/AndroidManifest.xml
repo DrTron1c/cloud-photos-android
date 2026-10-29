@@ -13,6 +13,15 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
+    <!-- Your own app name & picture: installing / removing the companion app made on the device. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Re-checks after a restart that the original icon is back if the companion app is gone. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <queries>
+        <package android:name="io.github.drtron1c.cloudphotos.launcher" />
+    </queries>
 
     <application
         android:name=".CloudPhotosApp"
@@ -121,6 +130,22 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/photo_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".identity.InstallResultReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".identity.LauncherWatcher"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
 
         <provider

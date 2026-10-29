@@ -31,6 +31,8 @@ import io.github.drtron1c.cloudphotos.photos.StaticList
 import io.github.drtron1c.cloudphotos.photos.SubsetList
 import io.github.drtron1c.cloudphotos.photos.UserAlbum
 import io.github.drtron1c.cloudphotos.photos.Version
+import io.github.drtron1c.cloudphotos.identity.CustomLauncher
+import io.github.drtron1c.cloudphotos.identity.LauncherApk
 import io.github.drtron1c.cloudphotos.settings.AppIdentity
 import io.github.drtron1c.cloudphotos.settings.Keys
 import io.github.drtron1c.cloudphotos.work.AutoUploadWorker
@@ -79,6 +81,7 @@ sealed interface Route {
     data class Editor(val key: String, val index: Int) : Route
     data object Settings : Route
     data object AllAlbums : Route
+    data object AppIdentity : Route
 }
 
 enum class Tab { Library, Albums, Search }
@@ -162,12 +165,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val lists = HashMap<String, MediaList>()
     private val reauthMutex = Mutex()
 
+    // Your own app name & icon (declared before init, which reads them).
+    /** Picture handed over by the viewer's "Use as App Icon". */
+    var iconSource by mutableStateOf<Any?>(null)
+    /** Label of the installed companion app, or null when it isn't installed. */
+    var companionLabel by mutableStateOf<String?>(null)
+    /** Bumped whenever the saved name / picture change. */
+    var identityVersion by mutableIntStateOf(0)
+    var needsInstallPermission by mutableStateOf(false)
+    var companionConflict by mutableStateOf(false)
+    private var pendingCompanion: Pair<String, Bitmap>? = null
+
     init {
         graph.photos.zoneName = zone
         graph.reauthHandler = { reauthenticate() }
         recentlyViewed = loadRecentlyViewed()
         refreshOffline()
+        refreshCompanion()
         viewModelScope.launch { startup() }
+        viewModelScope.launch {
+            CustomLauncher.events.collect {
+                toast(it)
+                refreshCompanion()
+            }
+        }
     }
 
     fun toast(msg: String) {
@@ -977,8 +998,99 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setLauncherName(alias: String) {
         settings.launcherName = alias
-        AppIdentity.setLauncherName(getApplication(), alias)
-        toast("App name changed — it can take a moment to update on your home screen")
+        val ctx = getApplication<Application>()
+        if (settings.hideOriginalIcon && CustomLauncher.isInstalled(ctx)) {
+            toast("Saved — the original icon is hidden while your own app is installed")
+        } else {
+            AppIdentity.setLauncherName(ctx, alias)
+            toast("App name changed — it can take a moment to update on your home screen")
+        }
+    }
+
+    // ---------------- your own app name & icon ----------------
+
+    fun refreshCompanion() {
+        val ctx = getApplication<Application>()
+        companionLabel = if (CustomLauncher.isInstalled(ctx)) CustomLauncher.installedLabel(ctx) ?: "" else null
+    }
+
+    fun useAsAppIcon(asset: Asset) {
+        val v = asset.medium ?: asset.thumbnail ?: return
+        iconSource = model(v)
+        open(Route.AppIdentity)
+    }
+
+    /** Builds your companion app with this name and picture and asks Android to install it. */
+    fun installCompanion(name: String, icon: Bitmap) {
+        val ctx = getApplication<Application>()
+        val clean = LauncherApk.cleanName(name)
+        if (clean.isEmpty()) {
+            toast("Type a name first"); return
+        }
+        if (!CustomLauncher.canInstall(ctx)) {
+            pendingCompanion = clean to icon
+            needsInstallPermission = true
+            return
+        }
+        pendingCompanion = null
+        viewModelScope.launch {
+            busy = "Making “$clean”…"
+            try {
+                val apk = withContext(Dispatchers.IO) {
+                    if (!CustomLauncher.canUpdateInstalled(ctx)) null
+                    else CustomLauncher.make(ctx, clean, CustomLauncher.saveIcon(ctx, icon))
+                }
+                if (apk == null) {
+                    companionConflict = true
+                } else {
+                    settings.customName = clean
+                    identityVersion++
+                    expectingExternal = true
+                    withContext(Dispatchers.IO) { CustomLauncher.install(ctx, apk) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                toast("Couldn't make your app: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                busy = null
+            }
+        }
+    }
+
+    /** Saves the name / picture for inside the app (lock screen, Recents) without installing. */
+    fun saveIdentity(name: String, icon: Bitmap?) {
+        val ctx = getApplication<Application>()
+        settings.customName = LauncherApk.cleanName(name)
+        viewModelScope.launch {
+            if (icon != null) withContext(Dispatchers.IO) { CustomLauncher.saveIcon(ctx, icon) }
+            identityVersion++
+        }
+    }
+
+    fun allowInstallsIntent(): Intent {
+        expectingExternal = true
+        return CustomLauncher.allowInstallsIntent(getApplication()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /** Uninstall prompt for the companion app; the original icon comes back first. */
+    fun removeCompanionIntent(): Intent {
+        AppIdentity.showOriginal(getApplication(), settings, true)
+        expectingExternal = true
+        return CustomLauncher.uninstallIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    fun setHideOriginal(on: Boolean) {
+        settings.hideOriginalIcon = on
+        val ctx = getApplication<Application>()
+        if (CustomLauncher.isInstalled(ctx)) AppIdentity.showOriginal(ctx, settings, !on)
+    }
+
+    fun pinIdentityShortcut(name: String, icon: Bitmap) {
+        val clean = LauncherApk.cleanName(name).ifEmpty { "Cloud Photos" }
+        val ok = AppIdentity.pinShortcut(getApplication(), clean, icon)
+        if (!ok) toast("Your home screen doesn't allow adding shortcuts — try “Add as App” instead")
+        else toast("If nothing appears, allow “Home screen shortcuts” for Cloud Photos in Android settings")
     }
 
     fun pinShortcut(name: String, color: Int) {
@@ -998,6 +1110,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onResumed() {
         expectingExternal = false
+        val ctx = getApplication<Application>()
+        CustomLauncher.reconcile(ctx)
+        refreshCompanion()
+        // Came back from allowing installs: carry on with the companion app.
+        val pending = pendingCompanion
+        if (pending != null && CustomLauncher.canInstall(ctx)) {
+            needsInstallPermission = false
+            installCompanion(pending.first, pending.second)
+        }
     }
 
     /** Back in the app after a while: pick up photos taken on the iPhone meanwhile. */

@@ -164,11 +164,9 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 Divider()
                 ToggleRow("Tab bar labels", "Show names under the Library, Albums and Search icons", s.tabLabels) { s.tabLabels = it }
                 Divider()
-                ValueRow("App name", AppSettings.LAUNCHER_NAMES.firstOrNull { it.first == s.launcherName }?.second ?: "Cloud Photos") { dialog = "name" }
-                Divider()
-                ActionRow("Add home-screen shortcut with any name…", p.accent) { dialog = "shortcut" }
+                ValueRow("App icon & name", s.appName) { vm.open(Route.AppIdentity) }
             }
-            Footer("Android only lets an app pick its home-screen name from names built into it, so choose one above — or add a shortcut with any name and colour you like.")
+            Footer("Type any name and use any picture as the app's icon.")
 
             // ---------- Library & grid ----------
             Group("Library") {
@@ -370,12 +368,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     }
 
     when (dialog) {
-        "name" -> ChoiceDialog(
-            title = "App name",
-            options = AppSettings.LAUNCHER_NAMES,
-            selected = s.launcherName,
-            onDismiss = { dialog = null },
-        ) { vm.setLauncherName(it); dialog = null }
         "dns" -> ChoiceDialog(
             title = "Encrypted DNS",
             options = DNS_OPTIONS,
@@ -383,10 +375,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             footer = "Looks up Apple's server addresses over HTTPS so your Wi-Fi or mobile provider can't log them. If a network blocks it, pick another provider.",
             onDismiss = { dialog = null },
         ) { vm.setDns(it); dialog = null }
-        "shortcut" -> ShortcutDialog(
-            canPin = AppIdentity.canPinShortcuts(context),
-            onDismiss = { dialog = null },
-        ) { name, color -> vm.pinShortcut(name, color); dialog = null }
         "autoupload" -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text("Upload which photos?") },
@@ -448,54 +436,6 @@ fun ChoiceDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
-}
-
-@Composable
-private fun ShortcutDialog(canPin: Boolean, onDismiss: () -> Unit, onAdd: (String, Int) -> Unit) {
-    val p = LocalPalette.current
-    var name by remember { mutableStateOf("") }
-    var colour by remember { mutableIntStateOf(0) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Home-screen shortcut") },
-        text = {
-            Column {
-                if (!canPin) {
-                    Text("Your home-screen app doesn't support adding shortcuts.", color = p.secondaryLabel)
-                    return@Column
-                }
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it.take(30) },
-                    label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                Text("Icon colour", color = p.secondaryLabel, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppSettings.ACCENTS.forEachIndexed { i, (label, argb) ->
-                        Box(
-                            Modifier.size(30.dp).clip(CircleShape).background(Color(argb))
-                                .border(if (colour == i) 3.dp else 0.dp, if (colour == i) p.label else Color.Transparent, CircleShape)
-                                .clickable { colour = i },
-                            contentAlignment = Alignment.Center,
-                        ) { if (colour == i) Icon(Icons.Filled.Check, label, tint = Color.White, modifier = Modifier.size(16.dp)) }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Your launcher will ask you to confirm. You can then remove the original icon from your home screen (the app stays in the app drawer).",
-                    color = p.secondaryLabel, fontSize = 12.sp,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = canPin && name.isNotBlank(),
-                onClick = { onAdd(name.trim(), Color(AppSettings.ACCENTS[colour].second).toArgb()) },
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

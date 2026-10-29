@@ -65,7 +65,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CloudPhotos-apk
-          path: CloudPhotos.apk
+          path: |
+            CloudPhotos.apk
+            app/build/launcher-test/CustomLauncher.apk
           if-no-files-found: error
 
       # A rolling "latest" release makes the APK one tap to download on the tablet.
@@ -89,6 +91,7 @@ jobs:
           cp "$GITHUB_WORKSPACE"/build.log "$GITHUB_WORKSPACE"/env.log . 2>/dev/null || true
           cp "$GITHUB_WORKSPACE"/badging.txt . 2>/dev/null || true
           cp "$GITHUB_WORKSPACE"/CloudPhotos.apk . 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE"/app/build/launcher-test/*.apk . 2>/dev/null || true
           grep -nE "^e: |^w: .*(deprecated|unused)|error:|FAILED|What went wrong|Could not|expected:|AssertionError" build.log > errors.txt 2>/dev/null || true
           mkdir -p test-results && cp -r "$GITHUB_WORKSPACE"/app/build/test-results/* test-results/ 2>/dev/null || true
           git add -A

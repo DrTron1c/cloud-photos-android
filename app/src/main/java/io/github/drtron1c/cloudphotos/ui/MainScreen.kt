@@ -82,10 +82,10 @@ fun AppRoot(vm: MainViewModel) {
             val unlock = {
                 if (activity != null) {
                     vm.expectingExternal = true
-                    activity.requireUnlock("Unlock Cloud Photos") { vm.unlock() }
+                    activity.requireUnlock("Unlock ${vm.settings.appName}") { vm.unlock() }
                 } else vm.unlock()
             }
-            LockScreen(onUnlock = unlock)
+            LockScreen(vm.settings.appName, onUnlock = unlock)
             LaunchedEffect(Unit) { unlock() }
         }
     }
@@ -147,6 +147,7 @@ fun MainScreen(vm: MainViewModel) {
                     }
                     Route.Settings -> SettingsScreen(vm) { vm.back() }
                     Route.AllAlbums -> AllAlbumsScreen(vm) { vm.back() }
+                    Route.AppIdentity -> IdentityScreen(vm) { vm.back() }
                 }
             }
         }

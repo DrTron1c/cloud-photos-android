@@ -25,26 +25,41 @@ object AppIdentity {
      * pick between names declared up front, so free-text names go through [pinShortcut].
      */
     fun setLauncherName(context: Context, alias: String) {
+        applyAliases(context, alias)
+    }
+
+    /**
+     * Show or hide the original Cloud Photos icon (used when your own companion app
+     * with a custom name and picture replaces it).
+     */
+    fun showOriginal(context: Context, settings: AppSettings, show: Boolean) {
+        applyAliases(context, if (show) settings.launcherName else null)
+    }
+
+    /** Enables exactly the [alias] launcher entry (none when null). */
+    private fun applyAliases(context: Context, alias: String?) {
         val pm = context.packageManager
         for ((a, _) in AppSettings.LAUNCHER_NAMES) {
             val component = ComponentName(context.packageName, "${context.packageName}.alias.$a")
-            pm.setComponentEnabledSetting(
-                component,
-                if (a == alias) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP,
-            )
+            val want = if (a == alias) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            if (pm.getComponentEnabledSetting(component) != want) {
+                pm.setComponentEnabledSetting(component, want, PackageManager.DONT_KILL_APP)
+            }
         }
     }
 
     fun canPinShortcuts(context: Context) = ShortcutManagerCompat.isRequestPinShortcutSupported(context)
 
     /** Adds a home-screen shortcut with any name the user typed and the chosen icon colour. */
-    fun pinShortcut(context: Context, name: String, color: Int): Boolean {
+    fun pinShortcut(context: Context, name: String, color: Int): Boolean = pinShortcut(context, name, iconBitmap(context, color))
+
+    /** Same, with any adaptive-icon picture (432×432, see IconArt). */
+    fun pinShortcut(context: Context, name: String, icon: Bitmap): Boolean {
         val label = name.trim().ifEmpty { "Cloud Photos" }.take(30)
         val shortcut = ShortcutInfoCompat.Builder(context, "custom-" + label.hashCode())
             .setShortLabel(label)
             .setLongLabel(label)
-            .setIcon(IconCompat.createWithAdaptiveBitmap(iconBitmap(context, color)))
+            .setIcon(IconCompat.createWithAdaptiveBitmap(icon))
             .setIntent(Intent(Intent.ACTION_MAIN).setClass(context, MainActivity::class.java))
             .build()
         return ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)

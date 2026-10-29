@@ -44,6 +44,9 @@ object Keys {
     const val HAPTICS = "haptics"
     const val CONFIRM_DELETE = "confirm_delete"
     const val LIBRARY_FILTER = "library_filter"
+    const val CUSTOM_NAME = "custom_name"
+    const val HIDE_ORIGINAL_ICON = "hide_original_icon"
+    const val COMPANION_STATUS = "companion_status"
 }
 
 /**
@@ -125,6 +128,13 @@ class AppSettings(private val prefs: SharedPreferences) {
 
     /** Launcher label preset (activity-alias name). */
     var launcherName by str(Keys.LAUNCHER_NAME, "CloudPhotos")
+
+    /** Your own name for the app (companion app, Recents, lock screen). Empty = "Cloud Photos". */
+    var customName by str(Keys.CUSTOM_NAME, "")
+    /** Hide the original icon while your companion app is installed. */
+    var hideOriginalIcon by bool(Keys.HIDE_ORIGINAL_ICON, false)
+
+    val appName: String get() = customName.trim().ifEmpty { "Cloud Photos" }
 
     fun raw(): SharedPreferences = prefs
 

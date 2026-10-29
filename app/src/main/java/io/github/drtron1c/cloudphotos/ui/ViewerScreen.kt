@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
@@ -269,6 +270,13 @@ fun ViewerScreen(vm: MainViewModel, list: MediaList, startIndex: Int, covered: B
                                         text = { Text("Add to Album") },
                                         leadingIcon = { Icon(Icons.Outlined.Collections, null) },
                                         onClick = { menu = false; addToAlbum = current },
+                                    )
+                                }
+                                if (!current.isVideo) {
+                                    DropdownMenuItem(
+                                        text = { Text("Use as App Icon") },
+                                        leadingIcon = { Icon(Icons.Outlined.Apps, null) },
+                                        onClick = { menu = false; vm.useAsAppIcon(current) },
                                     )
                                 }
                                 if (current.isLive) {

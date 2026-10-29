@@ -8,3 +8,9 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# apksig reads its ASN.1 structures through reflection on annotated fields.
+-keep class com.android.apksig.** { *; }
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault,Signature,InnerClasses,EnclosingMethod
+-dontwarn com.android.apksig.**
+-dontwarn javax.annotation.**
