@@ -289,4 +289,23 @@ class ViewerFitOnDeviceTest {
         Log.i(kit.tag, "VIEWER still magenta per capture $counts")
         assertTrue("still never left (${counts.takeLast(5)})", counts.takeLast(5).all { it == 0 })
     }
+
+    @Test
+    fun stillShowsWhileTheVideoCantStart() {
+        // Control for the two tests above: stills do load here, so their "no magenta" means something.
+        val missing = File(kit.dir, "missing.mp4").also { it.delete() }
+        val still = magentaStill(512, 288)
+        val type = "public.mpeg-4"
+        val a = Asset(
+            "test-control", "a-control", "CPLAsset", "tag", 0, 0, false, false, type, "IMG_CTRL.MOV", 512, 288, true, 2.0,
+            null,
+            Version(Uri.fromFile(still).toString(), still.length(), "still-control", "public.png", 512, 288),
+            null,
+            Version(Uri.fromFile(missing).toString(), 0, "orig-control", type, 512, 288),
+            null, null,
+        )
+        val (counts, _) = watch(a, 1000, 620)
+        Log.i(kit.tag, "VIEWER control magenta per capture $counts")
+        assertTrue("the still never showed (${counts.takeLast(3)})", counts.takeLast(3).all { it > 1000 })
+    }
 }
