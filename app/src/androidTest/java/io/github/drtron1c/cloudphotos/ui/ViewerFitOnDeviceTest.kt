@@ -82,7 +82,7 @@ class ViewerFitOnDeviceTest {
                 CompositionLocalProvider(LocalGlassEnabled provides true) {
                     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(with(d) { spaceW.toDp() }, with(d) { spaceH.toDp() }).testTag("space")) {
-                            GlassHost(Modifier.fillMaxSize(), content = { ViewerScreen(vm, list, 0) {} }) {}
+                            GlassHost(Modifier.fillMaxSize(), content = { ViewerScreen(vm, list, 0, startFullScreen = true) {} }) {}
                         }
                     }
                 }
@@ -90,8 +90,7 @@ class ViewerFitOnDeviceTest {
         }
         rule.waitForIdle()
         Thread.sleep(1500)
-        // Tap to hide the bars and controls (full screen), like you would.
-        rule.onNodeWithTag("space").performTouchInput { click(center) }
+        // Full screen (bars and controls hidden), as after tapping the picture.
         var shot: Bitmap? = null
         var last: List<Int>? = null
         val until = System.currentTimeMillis() + 20_000

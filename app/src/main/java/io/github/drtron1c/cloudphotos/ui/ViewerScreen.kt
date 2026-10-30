@@ -184,6 +184,8 @@ fun ViewerScreen(
     covered: Boolean = false,
     level: Int = 1,
     inSplit: Boolean = false,
+    /** Open with the bars hidden (full screen). */
+    startFullScreen: Boolean = false,
     onClose: () -> Unit,
 ) {
     val p = LocalPalette.current
@@ -192,7 +194,7 @@ fun ViewerScreen(
     val spec = list.spec
     val count = list.count.coerceAtLeast(0)
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) { count }
-    var chrome by remember { mutableStateOf(true) }
+    var chrome by remember { mutableStateOf(!startFullScreen) }
     var showInfo by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
