@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +78,8 @@ fun FrameStrip(
         val widthPx = constraints.maxWidth.coerceAtLeast(1)
         // As many frames as fit across when each keeps the video's shape.
         val aspect = source.aspect.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.3f, 3.5f) ?: (16f / 9f)
-        val n = ceil(widthPx / (heightPx * aspect)).toInt().coerceIn(4, 60)
+        val gapPx = with(LocalDensity.current) { 1.dp.roundToPx() }
+        val n = ceil(widthPx / (heightPx * aspect + gapPx)).toInt().coerceIn(2, 60)
         val times = remember(n, durationMs) { List(n) { (durationMs * (it + 0.5) / n).toLong() } }
         val pics = remember(source.key, n, durationMs) {
             mutableStateListOf<Bitmap?>().apply { for (t in times) add(FrameCache.get(source.key, t, heightPx)) }
@@ -91,7 +94,8 @@ fun FrameStrip(
                 withContext(Dispatchers.Main) { if (i < pics.size) pics[i] = b }
             }
         }
-        Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+        // A hairline between frames so each one reads as its own picture.
+        Row(Modifier.fillMaxWidth().fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
             for (i in 0 until n) {
                 val b = pics.getOrNull(i)
                 Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black.copy(alpha = 0.3f))) {

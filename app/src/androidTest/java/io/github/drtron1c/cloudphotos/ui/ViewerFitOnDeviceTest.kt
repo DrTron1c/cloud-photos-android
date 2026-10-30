@@ -187,6 +187,8 @@ class ViewerFitOnDeviceTest {
         rule.onNodeWithContentDescription("Back").assertExists()
         // Tap the picture (above the controls), like you would.
         rule.onNodeWithTag("space").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, height * 0.4f)) }
+        // A single tap counts once the double-tap wait (~300 ms) has passed: move the test clock on.
+        rule.mainClock.advanceTimeBy(700)
         Thread.sleep(600)
         rule.waitForIdle()
         Thread.sleep(600)
