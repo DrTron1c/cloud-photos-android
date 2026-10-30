@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.identity.LauncherApkTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:56:32" hostname="runnervm48cm3" time="3.435">
+  <properties/>
+  <testcase name="buildsSmokeTestApp" classname="io.github.drtron1c.cloudphotos.identity.LauncherApkTest" time="3.182"/>
+  <testcase name="cleansNames" classname="io.github.drtron1c.cloudphotos.identity.LauncherApkTest" time="0.0"/>
+  <testcase name="buildsSignedApkWithNameAndPicture" classname="io.github.drtron1c.cloudphotos.identity.LauncherApkTest" time="0.252"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

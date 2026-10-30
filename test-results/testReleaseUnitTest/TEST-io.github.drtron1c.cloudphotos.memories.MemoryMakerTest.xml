@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.memories.MemoryMakerTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:56:36" hostname="runnervm48cm3" time="1.815">
+  <properties/>
+  <testcase name="aDayOfNothingButFavourites" classname="io.github.drtron1c.cloudphotos.memories.MemoryMakerTest" time="0.813"/>
+  <testcase name="pickSpreadsOutAndKeepsFavourites" classname="io.github.drtron1c.cloudphotos.memories.MemoryMakerTest" time="0.318"/>
+  <testcase name="everyCoverIsOneOfItsOwnPhotos" classname="io.github.drtron1c.cloudphotos.memories.MemoryMakerTest" time="0.351"/>
+  <testcase name="makesOnThisDayTripsAndBigDays" classname="io.github.drtron1c.cloudphotos.memories.MemoryMakerTest" time="0.331"/>
+  <system-out><![CDATA[onthisday: On This Day — 1 year ago · 29 October 2025 (6)
+onthisday: On This Day — 2 years ago · 29 October 2024 (4)
+trip: Trip to Paris — 10–14 June 2025 (40)
+day: A Day in Athens — Saturday 15 March 2025 (45)
+season: Summer 2026 — 60 photos (45)
+season: Spring 2026 — 60 photos (45)
+season: Autumn 2025 — 66 photos (45)
+season: Summer 2025 — 98 photos (45)
+season: Spring 2025 — 120 photos (45)
+season: Autumn 2024 — 64 photos (45)
+year: 2025 in Photos — 342 photos (45)
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

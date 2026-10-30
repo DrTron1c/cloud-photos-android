@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.update.ReleaseParserTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:56:41" hostname="runnervm48cm3" time="0.031">
+  <properties/>
+  <testcase name="bundledChangelogParses" classname="io.github.drtron1c.cloudphotos.update.ReleaseParserTest" time="0.007"/>
+  <testcase name="noApkMeansNoRelease" classname="io.github.drtron1c.cloudphotos.update.ReleaseParserTest" time="0.006"/>
+  <testcase name="readsBuildApkAndNotes" classname="io.github.drtron1c.cloudphotos.update.ReleaseParserTest" time="0.015"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

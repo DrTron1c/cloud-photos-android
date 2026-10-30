@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.vpn.VpnPickerTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:56:41" hostname="runnervm48cm3" time="0.4">
+  <properties/>
+  <testcase name="readsWireGuardConfig" classname="io.github.drtron1c.cloudphotos.vpn.VpnPickerTest" time="0.125"/>
+  <testcase name="bundledListHasFreeServers" classname="io.github.drtron1c.cloudphotos.vpn.VpnPickerTest" time="0.052"/>
+  <testcase name="flags" classname="io.github.drtron1c.cloudphotos.vpn.VpnPickerTest" time="0.022"/>
+  <testcase name="closestFreeCountryFromAthensIsRomania" classname="io.github.drtron1c.cloudphotos.vpn.VpnPickerTest" time="0.196"/>
+  <system-out><![CDATA[FREE COUNTRIES [Canada, Japan, Mexico, Netherlands, Norway, Poland, Romania, Singapore, Switzerland, United States]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

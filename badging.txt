@@ -1,0 +1,38 @@
+package: name='io.github.drtron1c.cloudphotos' versionCode='48' versionName='1.0.48' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+targetSdkVersion:'35'
+uses-permission: name='android.permission.INTERNET'
+uses-permission: name='android.permission.ACCESS_NETWORK_STATE'
+uses-permission: name='android.permission.USE_BIOMETRIC'
+uses-permission: name='android.permission.READ_MEDIA_IMAGES'
+uses-permission: name='android.permission.READ_MEDIA_VIDEO'
+uses-permission: name='android.permission.READ_MEDIA_VISUAL_USER_SELECTED'
+uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' maxSdkVersion='32'
+uses-permission: name='com.android.launcher.permission.INSTALL_SHORTCUT'
+uses-permission: name='android.permission.REQUEST_INSTALL_PACKAGES'
+uses-permission: name='android.permission.REQUEST_DELETE_PACKAGES'
+uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'
+uses-permission: name='android.permission.POST_NOTIFICATIONS'
+uses-permission: name='android.permission.USE_FINGERPRINT'
+uses-permission: name='android.permission.WAKE_LOCK'
+uses-permission: name='android.permission.FOREGROUND_SERVICE'
+uses-permission: name='io.github.drtron1c.cloudphotos.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'
+application-label:'Cloud Photos'
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): false
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v3.2 scheme (APK Signature Scheme v3.2): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+V3.0 Signer: certificate DN: CN=Cloud Photos, O=Personal build
+V3.0 Signer: certificate SHA-256 digest: 0958007bdce42bed7539c45c1c8d143f4e803bd885ee590fc966c3467208b73b
+V3.0 Signer: certificate SHA-1 digest: 3a3855557fb1cafc8634a81fed887a7d93194323
+V3.0 Signer: certificate MD5 digest: 74049b46e262c9e37aa755cf0d8cefe8
+V3.0 Signer: key algorithm: RSA
+V3.0 Signer: key size (bits): 2048
+V3.0 Signer: public key SHA-256 digest: db1219bc9229f7f5f34e9b49043fd5b92632dbc4153e0d5e4dc0b12cb228cb5e
+V3.0 Signer: public key SHA-1 digest: 97b69cd124e981cb9d5fc6c2987e44a27095f6c2
+V3.0 Signer: public key MD5 digest: b1ca87635224d689511b5e63a184ee75
+-rw-r--r-- 1 runner runner 30570137 Oct 30 09:02 CloudPhotos.apk

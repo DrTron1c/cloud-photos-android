@@ -1,0 +1,240 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.11.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :aicore:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :aicore:compileKotlin FROM-CACHE
+> Task :aicore:compileJava NO-SOURCE
+> Task :aicore:processResources NO-SOURCE
+> Task :aicore:classes UP-TO-DATE
+> Task :aicore:jar
+> Task :aicore:compileTestKotlin FROM-CACHE
+> Task :aicore:compileTestJava NO-SOURCE
+> Task :aicore:processTestResources NO-SOURCE
+> Task :aicore:testClasses UP-TO-DATE
+> Task :aicore:test FROM-CACHE
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :launcher:preBuild UP-TO-DATE
+> Task :launcher:preReleaseBuild UP-TO-DATE
+> Task :launcher:mergeReleaseJniLibFolders
+> Task :launcher:mergeReleaseNativeLibs NO-SOURCE
+> Task :launcher:stripReleaseDebugSymbols NO-SOURCE
+> Task :launcher:extractReleaseNativeSymbolTables NO-SOURCE
+> Task :launcher:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :launcher:checkReleaseDuplicateClasses
+> Task :launcher:javaPreCompileRelease FROM-CACHE
+> Task :launcher:checkReleaseAarMetadata
+> Task :launcher:generateReleaseResValues FROM-CACHE
+> Task :launcher:mapReleaseSourceSetPaths
+> Task :launcher:generateReleaseResources FROM-CACHE
+> Task :launcher:mergeReleaseResources FROM-CACHE
+> Task :launcher:packageReleaseResources FROM-CACHE
+> Task :launcher:parseReleaseLocalResources FROM-CACHE
+> Task :launcher:createReleaseCompatibleScreenManifests
+> Task :launcher:extractDeepLinksRelease FROM-CACHE
+> Task :launcher:processReleaseMainManifest
+> Task :launcher:processReleaseManifest
+> Task :launcher:desugarReleaseFileDependencies FROM-CACHE
+> Task :launcher:mergeReleaseStartupProfile
+> Task :launcher:mergeExtDexRelease FROM-CACHE
+> Task :launcher:mergeReleaseArtProfile
+> Task :launcher:processReleaseManifestForPackage
+> Task :launcher:mergeReleaseShaders
+> Task :launcher:compileReleaseShaders NO-SOURCE
+> Task :launcher:generateReleaseAssets UP-TO-DATE
+> Task :launcher:mergeReleaseAssets
+> Task :launcher:compressReleaseAssets FROM-CACHE
+> Task :launcher:extractReleaseVersionControlInfo
+> Task :launcher:processReleaseJavaRes NO-SOURCE
+> Task :launcher:collectReleaseDependencies
+> Task :launcher:processReleaseResources
+> Task :launcher:sdkReleaseDependencyData
+> Task :launcher:mergeReleaseJavaResource
+> Task :launcher:compileReleaseJavaWithJavac FROM-CACHE
+> Task :launcher:dexBuilderRelease FROM-CACHE
+> Task :launcher:mergeDexRelease FROM-CACHE
+> Task :launcher:mergeReleaseGlobalSynthetics FROM-CACHE
+> Task :launcher:compileReleaseArtProfile FROM-CACHE
+> Task :launcher:writeReleaseAppMetadata
+> Task :launcher:writeReleaseSigningConfigVersions
+> Task :launcher:optimizeReleaseResources
+> Task :launcher:packageRelease
+> Task :launcher:createReleaseApkListingFileRedirect
+> Task :launcher:assembleRelease
+> Task :app:copyLauncherTemplate
+> Task :app:preBuild
+> Task :app:preReleaseBuild
+> Task :app:generateReleaseBuildConfig
+> Task :app:generateReleaseResValues FROM-CACHE
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources FROM-CACHE
+> Task :app:mergeReleaseResources FROM-CACHE
+> Task :app:packageReleaseResources FROM-CACHE
+> Task :app:parseReleaseLocalResources FROM-CACHE
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:preReleaseUnitTestBuild
+> Task :app:javaPreCompileReleaseUnitTest FROM-CACHE
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseNativeLibs
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libonnxruntime.so, libonnxruntime4j_jni.so, libpl_droidsonroids_gif.so, libwg-go.so, libwg-quick.so, libwg.so.
+
+> Task :app:mergeReleaseAssets
+> Task :app:extractReleaseNativeSymbolTables FROM-CACHE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:processReleaseResources
+> Task :app:compressReleaseAssets
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:preReleaseTestBuild
+> Task :app:generateReleaseTestBuildConfig
+> Task :app:generateReleaseTestResValues FROM-CACHE
+> Task :app:checkReleaseTestAarMetadata
+> Task :app:mapReleaseTestSourceSetPaths
+> Task :app:convertLinkedResourcesToProtoRelease
+> Task :app:generateReleaseTestResources FROM-CACHE
+> Task :app:mergeReleaseTestResources FROM-CACHE
+> Task :app:packageReleaseTestResources FROM-CACHE
+> Task :app:parseReleaseTestLocalResources FROM-CACHE
+> Task :app:createReleaseTestCompatibleScreenManifests
+> Task :app:extractDeepLinksReleaseTest FROM-CACHE
+> Task :app:processReleaseTestMainManifest
+> Task :app:processReleaseTestManifest
+> Task :app:javaPreCompileReleaseTest FROM-CACHE
+> Task :app:mergeReleaseTestJniLibFolders
+> Task :app:processReleaseTestManifestForPackage
+> Task :app:checkReleaseTestDuplicateClasses
+> Task :app:mergeReleaseTestNativeLibs
+> Task :app:mergeReleaseTestArtProfile
+> Task :app:mergeReleaseTestStartupProfile
+> Task :app:mergeReleaseTestShaders
+> Task :app:compileReleaseTestShaders NO-SOURCE
+> Task :app:generateReleaseTestAssets UP-TO-DATE
+> Task :app:mergeReleaseTestAssets
+> Task :app:compressReleaseTestAssets FROM-CACHE
+
+> Task :app:stripReleaseTestDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libonnxruntime.so, libonnxruntime4j_jni.so, libpl_droidsonroids_gif.so, libwg-go.so, libwg-quick.so, libwg.so.
+
+> Task :app:extractReleaseTestVersionControlInfo
+> Task :app:extractReleaseTestNativeSymbolTables FROM-CACHE
+> Task :app:mergeReleaseTestNativeDebugMetadata NO-SOURCE
+> Task :app:processReleaseTestResources
+> Task :app:collectReleaseTestDependencies
+> Task :app:sdkReleaseTestDependencyData
+> Task :app:validateSigningReleaseTest
+> Task :app:writeReleaseTestAppMetadata
+> Task :app:writeReleaseTestSigningConfigVersions
+> Task :app:preReleaseTestAndroidTestBuild SKIPPED
+> Task :app:processReleaseTestAndroidTestManifest
+> Task :app:optimizeReleaseTestResources
+> Task :app:generateReleaseTestAndroidTestBuildConfig FROM-CACHE
+> Task :app:checkReleaseTestAndroidTestAarMetadata
+> Task :app:generateReleaseTestAndroidTestResValues FROM-CACHE
+> Task :app:mapReleaseTestAndroidTestSourceSetPaths
+> Task :app:generateReleaseTestAndroidTestResources FROM-CACHE
+> Task :app:mergeReleaseTestAndroidTestResources FROM-CACHE
+> Task :app:processReleaseTestAndroidTestResources FROM-CACHE
+> Task :app:javaPreCompileReleaseTestAndroidTest FROM-CACHE
+> Task :app:mergeReleaseTestAndroidTestShaders
+> Task :app:compileReleaseTestAndroidTestShaders NO-SOURCE
+> Task :app:generateReleaseTestAndroidTestAssets UP-TO-DATE
+> Task :app:mergeReleaseTestAndroidTestAssets
+> Task :app:compressReleaseTestAndroidTestAssets FROM-CACHE
+> Task :app:checkReleaseTestAndroidTestDuplicateClasses
+> Task :app:mergeReleaseTestAndroidTestJniLibFolders
+> Task :app:mergeReleaseTestAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripReleaseTestAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningReleaseTestAndroidTest
+> Task :app:writeReleaseTestAndroidTestSigningConfigVersions
+> Task :app:compileReleaseKotlin
+> Task :app:compileReleaseTestKotlin
+
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/auth/AppleAuth.kt:319:17 Condition is always 'true'.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/identity/LauncherApk.kt:69:61 'constructor(name: String!, privateKey: PrivateKey!, certificates: (Mutable)List<X509Certificate!>!): ApkSigner.SignerConfig.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/ui/FittedVideo.kt:61:28 'field unappliedRotationDegrees: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/ui/VideoTrimmer.kt:50:47 'constructor(p0: EditedMediaItem, vararg p1: EditedMediaItem): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseTestKotlin
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/auth/AppleAuth.kt:319:17 Condition is always 'true'.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/identity/LauncherApk.kt:69:61 'constructor(name: String!, privateKey: PrivateKey!, certificates: (Mutable)List<X509Certificate!>!): ApkSigner.SignerConfig.Builder' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/ui/FittedVideo.kt:61:28 'field unappliedRotationDegrees: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/main/java/io/github/drtron1c/cloudphotos/ui/VideoTrimmer.kt:50:47 'constructor(p0: EditedMediaItem, vararg p1: EditedMediaItem): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseTestJavaWithJavac
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:processReleaseJavaRes
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:mergeReleaseJavaResource
+> Task :app:generateReleaseTestLintVitalReportModel
+> Task :app:expandReleaseArtProfileWildcards
+
+> Task :app:compileReleaseUnitTestKotlin
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/test/java/io/github/drtron1c/cloudphotos/identity/LauncherApkTest.kt:28:13 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.io.File?'.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/test/java/io/github/drtron1c/cloudphotos/identity/LauncherApkTest.kt:78:61 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.io.File?'.
+
+> Task :app:compileReleaseUnitTestJavaWithJavac
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:testReleaseUnitTest
+> Task :app:expandReleaseTestArtProfileWildcards
+> Task :app:mergeReleaseTestGeneratedProguardFiles
+> Task :app:processReleaseTestJavaRes
+> Task :app:mergeReleaseTestJavaResource
+> Task :app:bundleReleaseTestClassesToCompileJar
+
+> Task :app:compileReleaseTestAndroidTestKotlin
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/androidTest/java/io/github/drtron1c/cloudphotos/ui/MediaExtrasOnDeviceTest.kt:123:45 'constructor(p0: EditedMediaItem, vararg p1: EditedMediaItem): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/androidTest/java/io/github/drtron1c/cloudphotos/ui/VideoTestKit.kt:70:57 'constructor(p0: (Mutable)List<EditedMediaItem>): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/androidTest/java/io/github/drtron1c/cloudphotos/ui/VideoTestKit.kt:76:36 'constructor(p0: (Mutable)List<EditedMediaItem>): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloud-photos-android/cloud-photos-android/app/src/androidTest/java/io/github/drtron1c/cloudphotos/ui/VideoTestKit.kt:85:36 'constructor(p0: (Mutable)List<EditedMediaItem>): EditedMediaItemSequence' is deprecated. Deprecated in Java.
+
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:compileReleaseTestAndroidTestJavaWithJavac
+> Task :app:processReleaseTestAndroidTestJavaRes
+> Task :app:mergeReleaseTestAndroidTestJavaResource
+> Task :app:lintVitalAnalyzeReleaseTest
+> Task :app:minifyReleaseWithR8
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:lintVitalReportReleaseTest
+> Task :app:lintVitalReleaseTest
+> Task :app:compileReleaseArtProfile
+> Task :app:shrinkReleaseRes
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+> Task :app:minifyReleaseTestWithR8
+> Task :app:compileReleaseTestArtProfile
+> Task :app:packageReleaseTest
+> Task :app:createReleaseTestApkListingFileRedirect
+> Task :app:assembleReleaseTest
+> Task :app:minifyReleaseTestAndroidTestWithR8
+> Task :app:packageReleaseTestAndroidTest
+> Task :app:createReleaseTestAndroidTestApkListingFileRedirect
+> Task :app:assembleReleaseTestAndroidTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1793350490414.json
+
+BUILD SUCCESSFUL in 7m 54s
+169 actionable tasks: 126 executed, 43 from cache
