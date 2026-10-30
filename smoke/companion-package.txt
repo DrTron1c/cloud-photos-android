@@ -1,0 +1,5 @@
+        9fb9461 io.github.drtron1c.cloudphotos.launcher/.LaunchActivity filter b59eb86
+          Category: "android.intent.category.LAUNCHER"
+  [io.github.drtron1c.cloudphotos.launcher]
+  Package [io.github.drtron1c.cloudphotos.launcher] (30bf7d9):
+    pkg=Package{c72d59e io.github.drtron1c.cloudphotos.launcher}

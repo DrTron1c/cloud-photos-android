@@ -1,0 +1,3 @@
+id=favourites
+id=memories
+id=upload
