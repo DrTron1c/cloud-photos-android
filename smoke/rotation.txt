@@ -1,0 +1,4 @@
+1 old:      Success
+2 rotated:  Success
+3 old key:  adb: failed to install rotation/3-old-again.apk: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package io.github.drtron1c.cloudphotos.launcher signatures do not match newer version; ignoring!]
+signer now:  signatures=PackageSignatures{8335445 version:3, signatures:[abebe781], past signatures:[d51d2254 flags: 17, abebe781 flags: 17]} 
