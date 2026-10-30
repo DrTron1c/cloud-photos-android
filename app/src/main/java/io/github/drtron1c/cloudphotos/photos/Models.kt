@@ -70,13 +70,35 @@ data class Asset(
 
     val thumbnail: Version? get() = thumb ?: medium
 
+    /** Same picture shape (within 3%)? A cropped edit differs from stills of the original. */
+    private fun Version.sameShape(other: Version): Boolean {
+        if (width <= 0 || height <= 0 || other.width <= 0 || other.height <= 0) return false
+        val a = width.toFloat() / height
+        val b = other.width.toFloat() / other.height
+        return kotlin.math.abs(a - b) <= 0.03f * b
+    }
+
     /** Best stream for playback. */
     val playbackVideo: Version?
         get() = if (isVideo) edited ?: original ?: videoMedium else null
 
-    /** Smaller stream used for offline copies. */
+    /**
+     * Smaller stream used for offline copies — but never one of the unedited original when the
+     * video was edited (cropped): iCloud's smaller stream is often made from the original.
+     */
     val offlineVideo: Version?
-        get() = if (isVideo) videoMedium ?: edited ?: original else null
+        get() = if (isVideo) videoMedium?.takeIf { edited == null || it.sameShape(edited) } ?: edited ?: original else null
+
+    /**
+     * The still shown while [played] loads. For an edited (e.g. cropped) video it must have the
+     * edit's shape: iCloud's stills of edited videos are often of the uncropped original. None
+     * fits → nothing is shown until the video's own first frame.
+     */
+    fun stillFor(played: Version?): Version? {
+        if (!isVideo || edited == null) return medium ?: thumb
+        val target = played ?: edited
+        return listOfNotNull(medium, thumb).firstOrNull { it.sameShape(target) }
+    }
 
     val currentFilename: String
         get() {

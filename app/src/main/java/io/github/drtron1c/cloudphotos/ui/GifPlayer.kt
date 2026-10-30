@@ -69,6 +69,9 @@ class GifPlayer(
     private var anchorPos = 0L
     private var anchorClock = 0L
     private var ticker: Job? = null
+    @Volatile private var drewFirst = false
+    /** True for the one state update that announces the first frame on screen. */
+    private var announceFirst = false
 
     private val surfaceLock = Any()
     private var surface: Surface? = null
@@ -130,6 +133,7 @@ class GifPlayer(
             .setVideoSize(size)
             .setPlaylist(listOf(item))
             .setContentPositionMs { position() }
+            .setNewlyRenderedFirstFrame(announceFirst)
             .build()
     }
 
@@ -298,6 +302,14 @@ class GifPlayer(
                 c.drawBitmap(b, null, Rect(0, 0, c.width, c.height), paint)
             } finally {
                 runCatching { s.unlockCanvasAndPost(c) }
+            }
+            if (!drewFirst) {
+                drewFirst = true
+                scope.launch {
+                    announceFirst = true
+                    invalidateState()
+                    announceFirst = false
+                }
             }
         }
     }

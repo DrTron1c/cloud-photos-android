@@ -911,9 +911,12 @@ private fun VideoPage(
     // device; otherwise it streams from iCloud (through the temporary cache).
     val gif = asset.isGif
     val video = if (gif) asset.original else asset.offlineVideo?.takeIf { vm.mediaUri(it).scheme == "file" } ?: asset.playbackVideo
+    // Shown until the video's own first frame is up, then hidden so it never shows behind or around
+    // the playing video. For a cropped video, only a still with the crop's shape (never the original).
+    var pictureUp by remember(asset.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        val poster = asset.medium ?: asset.thumbnail
-        if (poster != null) {
+        val poster = if (gif) asset.medium ?: asset.thumbnail else asset.stillFor(video)
+        if (poster != null && !(active && pictureUp)) {
             AsyncImage(
                 model = remember(poster.checksum) {
                     ImageRequest.Builder(context).data(vm.model(poster)).memoryCacheKey(poster.checksum).diskCacheKey(poster.checksum)
@@ -941,6 +944,13 @@ private fun VideoPage(
                 }
             }
             DisposableEffect(player) { onDispose { player.release() } }
+            DisposableEffect(player) {
+                val l = object : Player.Listener {
+                    override fun onRenderedFirstFrame() { pictureUp = true }
+                }
+                player.addListener(l)
+                onDispose { player.removeListener(l); pictureUp = false }
+            }
             // The frame strip and frame-by-frame buttons.
             val frames: FrameSource = remember(player) {
                 player as? GifPlayer ?: VideoFrames(player as ExoPlayer, vm.mediaUri(video), video.checksum, video.size, vm.mediaCache)

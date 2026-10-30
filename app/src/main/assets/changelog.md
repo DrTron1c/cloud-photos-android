@@ -13,6 +13,7 @@
 - **Where was this?** — the globe button on a photo or video shows where it was taken on the map, with “Photos Taken Here”.
 - **Tablets** — iPad-style sidebar, photos open beside the grid, highest refresh rate (e.g. 144 Hz), keyboard shortcuts (Ctrl+/), drag photos into other apps and drop photos in to upload.
 - **More** — export to any folder, share HEIC as JPEG, Quick Settings tile for Proton VPN, long-press app-icon shortcuts.
+- **Edited videos** — a cropped video shows as cropped from the first moment: no flash of the uncropped original while it loads, and nothing of it behind or around the playing video (offline copies keep your edit too).
 - **Covers** — Memories, People & Pets, Places and Similar Photos always show their own photos, even right after photos are added or removed on another device (Similar Photos' clean-up only ever deletes the exact photos shown).
 - **Privacy** — all of this runs on the device; Hidden and Recently Deleted photos are never analysed, and anything learned about a photo is wiped when you hide or delete it.
 

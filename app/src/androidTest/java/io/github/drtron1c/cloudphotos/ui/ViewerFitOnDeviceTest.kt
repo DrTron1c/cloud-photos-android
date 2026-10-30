@@ -197,4 +197,96 @@ class ViewerFitOnDeviceTest {
         rule.onNodeWithContentDescription("Back").assertDoesNotExist()
         rule.onNodeWithContentDescription("Pause").assertDoesNotExist()
     }
+
+    /** A magenta still the size of [w]×[h]: easy to spot if it ever shows. */
+    private fun magentaStill(w: Int, h: Int): File {
+        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        b.eraseColor(android.graphics.Color.rgb(255, 0, 255))
+        return File(kit.dir, "still-${w}x$h.png").also { f -> f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+    }
+
+    private fun magenta(b: Bitmap): Int {
+        var n = 0
+        val row = IntArray(b.width)
+        for (y in 0 until b.height step 3) {
+            b.getPixels(row, 0, b.width, 0, y, b.width, 1)
+            for (c in row) if (android.graphics.Color.red(c) > 200 && android.graphics.Color.green(c) < 90 && android.graphics.Color.blue(c) > 200) n++
+        }
+        return n
+    }
+
+    /** Opens [a] full screen and returns how many magenta pixels showed in each capture (~4 s), plus the last capture. */
+    private fun watch(a: Asset, spaceW: Int, spaceH: Int): Pair<List<Int>, Bitmap> {
+        lateinit var vm: MainViewModel
+        rule.runOnUiThread { vm = MainViewModel(ctx.applicationContext as Application) }
+        val list = OneItem(a)
+        rule.setContent {
+            val d = LocalDensity.current
+            CloudPhotosTheme(themeMode = "dark") {
+                CompositionLocalProvider(LocalGlassEnabled provides true) {
+                    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(with(d) { spaceW.toDp() }, with(d) { spaceH.toDp() }).testTag("space")) {
+                            GlassHost(Modifier.fillMaxSize(), content = { ViewerScreen(vm, list, 0, startFullScreen = true) {} }) {}
+                        }
+                    }
+                }
+            }
+        }
+        val counts = ArrayList<Int>()
+        var last: Bitmap? = null
+        val until = System.currentTimeMillis() + 4_000
+        while (System.currentTimeMillis() < until) {
+            rule.waitForIdle()
+            val b = rule.onNodeWithTag("space").captureToImage().asAndroidBitmap()
+            counts += magenta(b)
+            last = b
+            Thread.sleep(150)
+        }
+        return counts to last!!
+    }
+
+    @Test
+    fun croppedVideoNeverShowsTheUncroppedStill() {
+        // The original is 16:9; it was cropped to a square. iCloud's still is of the original.
+        val (orig, ow, oh) = shaped(kit.video(512, 288))
+        val (crop, cw, ch) = shaped(kit.video(288, 288))
+        val still = magentaStill(ow, oh)
+        val type = "public.mpeg-4"
+        val a = Asset(
+            "test-cropped", "a-cropped", "CPLAsset", "tag", 0, 0, false, false, type, "IMG_CROP.MOV", ow, oh, true, 2.0,
+            null,
+            Version(Uri.fromFile(still).toString(), still.length(), "still-cropped", "public.png", ow, oh),
+            Version(Uri.fromFile(crop).toString(), crop.length(), "edit-cropped", type, cw, ch),
+            Version(Uri.fromFile(orig).toString(), orig.length(), "orig-cropped", type, ow, oh),
+            null, null,
+        )
+        val (counts, last) = watch(a, 1000, 620)
+        kit.save(last, "viewer-cropped.png")
+        Log.i(kit.tag, "VIEWER cropped magenta per capture $counts")
+        assertTrue("the uncropped still showed (${counts.max()} px)", counts.all { it == 0 })
+        // And the cropped (square) video is what's showing, fitted.
+        val box = VideoTestKit.bounds(last)!!
+        val side = 620
+        assertTrue("square crop fitted, got $box", Math.abs(box[2] - box[0] + 1 - side) <= 6 && Math.abs(box[3] - box[1] + 1 - side) <= 6)
+    }
+
+    @Test
+    fun stillIsGoneOnceTheVideoPlays() {
+        val (f, w, h) = shaped(kit.video(512, 288))
+        // A still a little taller than the video, so if it stayed it would show above and below it.
+        val still = magentaStill(w, h + 60)
+        val type = "public.mpeg-4"
+        val a = Asset(
+            "test-still", "a-still", "CPLAsset", "tag", 0, 0, false, false, type, "IMG_STILL.MOV", w, h, true, 2.0,
+            null,
+            Version(Uri.fromFile(still).toString(), still.length(), "still-plain", "public.png", w, h + 60),
+            null,
+            Version(Uri.fromFile(f).toString(), f.length(), "orig-plain", type, w, h),
+            null, null,
+        )
+        val (counts, last) = watch(a, 1000, 620)
+        kit.save(last, "viewer-still-gone.png")
+        Log.i(kit.tag, "VIEWER still magenta per capture $counts")
+        assertTrue("still never left (${counts.takeLast(5)})", counts.takeLast(5).all { it == 0 })
+    }
 }
