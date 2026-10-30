@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.photos.EditedVideoTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:40:42" hostname="runnervm48cm3" time="0.008">
+  <properties/>
+  <testcase name="croppedVideoSkipsStillsOfTheOriginal" classname="io.github.drtron1c.cloudphotos.photos.EditedVideoTest" time="0.004"/>
+  <testcase name="croppedVideoUsesAStillOfTheCrop" classname="io.github.drtron1c.cloudphotos.photos.EditedVideoTest" time="0.0"/>
+  <testcase name="uneditedVideoKeepsItsStills" classname="io.github.drtron1c.cloudphotos.photos.EditedVideoTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

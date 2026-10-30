@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.ui.KeyRouterTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:40:42" hostname="runnervm48cm3" time="0.007">
+  <properties/>
+  <testcase name="deepestScreenWins" classname="io.github.drtron1c.cloudphotos.ui.KeyRouterTest" time="0.007"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

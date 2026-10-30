@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.memories.MemoryMusicTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:40:39" hostname="runnervm48cm3" time="2.84">
+  <properties/>
+  <testcase name="rendersPlayableLoopsForEveryStyle" classname="io.github.drtron1c.cloudphotos.memories.MemoryMusicTest" time="2.84"/>
+  <system-out><![CDATA[gentle: 25.3 s, 3157 KB
+bright: 18.5 s, 2307 KB
+dreamy: 29.1 s, 3636 KB
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

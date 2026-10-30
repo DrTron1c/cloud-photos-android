@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.ui.SearchQueryTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:40:42" hostname="runnervm48cm3" time="0.011">
+  <properties/>
+  <testcase name="fileNamesStillWork" classname="io.github.drtron1c.cloudphotos.ui.SearchQueryTest" time="0.005"/>
+  <testcase name="redHatLate2026" classname="io.github.drtron1c.cloudphotos.ui.SearchQueryTest" time="0.004"/>
+  <testcase name="seasonsAndRelative" classname="io.github.drtron1c.cloudphotos.ui.SearchQueryTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.drtron1c.cloudphotos.auth.AppleSrpTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-30T08:40:42" hostname="runnervm48cm3" time="0.143">
+  <properties/>
+  <testcase name="s2kMatchesReference" classname="io.github.drtron1c.cloudphotos.auth.AppleSrpTest" time="0.084"/>
+  <testcase name="s2kFoMatchesReference" classname="io.github.drtron1c.cloudphotos.auth.AppleSrpTest" time="0.059"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
