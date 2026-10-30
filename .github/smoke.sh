@@ -112,7 +112,7 @@ if [ -f "$TEST" ]; then
     io.github.drtron1c.cloudphotos.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee $OUT/device-test.txt
   echo "exit=$?" >> $OUT/device-test.txt
   adb logcat -d | grep -iE "CompanionTest|TestRunner|AndroidRuntime|apksig|keystore|keymint|keymaster|cloudphotos|Instrumentation|System.err|WireGuard|GoBackend|onnx|Transformer|heif" | tail -400 > $OUT/device-test-logcat.txt
-  for f in glass-light.png glass-dark.png video-fit-portrait-in-landscape.png video-fit-landscape-in-portrait.png video-fit-rotated-phone-on-tablet.png video-fit-landscape-on-tablet.png video-fit-large.png video-fit-downscale-landscape.png video-fit-downscale-rotated.png viewer-fit-rotated-phone-landscape.png viewer-fit-rotated-phone-bigger.png viewer-fit-landscape-portrait.png viewer-fit-landscape-bigger.png viewer-fit-gif-portrait.png gif-frame.png; do adb pull /sdcard/Download/$f $OUT/$f 2>&1 | tail -1; done
+  for f in glass-light.png glass-dark.png video-fit-portrait-in-landscape.png video-fit-landscape-in-portrait.png video-fit-rotated-phone-on-tablet.png video-fit-landscape-on-tablet.png video-fit-large.png video-fit-downscale-landscape.png video-fit-downscale-rotated.png viewer-fit-rotated-phone-landscape.png viewer-fit-rotated-phone-bigger.png viewer-fit-landscape-portrait.png viewer-fit-landscape-bigger.png viewer-fit-gif-portrait.png gif-frame.png viewer-after-tap.png; do adb pull /sdcard/Download/$f $OUT/$f 2>&1 | tail -1; done
   adb shell input keyevent KEYCODE_HOME; sleep 2
   adb shell input swipe 540 2000 540 600 300; sleep 3
   shot 9-app-drawer-device-made

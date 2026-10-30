@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -164,5 +165,34 @@ class ViewerFitOnDeviceTest {
     fun gifPlaysFittedLikeAVideo() {
         val f = File(kit.dir, "portrait.gif").apply { writeBytes(VideoTestKit.gif(48, 96, listOf(0, 1, 2, 3), 25)) }
         check("gif-portrait", f, 48, 96, 900, 560, gif = true)
+    }
+
+    @Test
+    fun tappingThePictureHidesTheBars() {
+        val (f, w, h) = shaped(kit.video(512, 288))
+        lateinit var vm: MainViewModel
+        rule.runOnUiThread { vm = MainViewModel(ctx.applicationContext as Application) }
+        val list = OneItem(asset(f, w, h))
+        rule.setContent {
+            CloudPhotosTheme(themeMode = "dark") {
+                CompositionLocalProvider(LocalGlassEnabled provides true) {
+                    Box(Modifier.fillMaxSize().testTag("space")) {
+                        GlassHost(Modifier.fillMaxSize(), content = { ViewerScreen(vm, list, 0) {} }) {}
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        Thread.sleep(1500)
+        rule.onNodeWithContentDescription("Back").assertExists()
+        // Tap the picture (above the controls), like you would.
+        rule.onNodeWithTag("space").performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 2f, height * 0.4f)) }
+        Thread.sleep(600)
+        rule.waitForIdle()
+        Thread.sleep(600)
+        rule.waitForIdle()
+        kit.save(rule.onNodeWithTag("space").captureToImage().asAndroidBitmap(), "viewer-after-tap.png")
+        rule.onNodeWithContentDescription("Back").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Pause").assertDoesNotExist()
     }
 }
