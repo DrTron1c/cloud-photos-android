@@ -27,7 +27,6 @@ import kotlinx.coroutines.delay
 import me.saket.telephoto.zoomable.ZoomableContentLocation
 import me.saket.telephoto.zoomable.ZoomableState
 import me.saket.telephoto.zoomable.zoomable
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -36,9 +35,10 @@ import kotlin.math.roundToInt
  * sides or top and bottom, never cropped), whatever the shape of the video or the screen.
  * Pinch or double-tap zooms into the real pixels; pinching back out returns to the whole picture.
  *
- * The zoom library is told the picture is already fitted ([ZoomableContentLocation.scaledToFitAndCenterAligned]).
- * Telling it the raw pixel size instead made it enlarge any video with fewer pixels than the
- * screen a second time, which cropped it, and that became the furthest you could pinch out.
+ * The picture is laid out at exactly its fitted size, and the zoom library is told so
+ * ([ZoomableContentLocation.scaledToFitAndCenterAligned]), so 1× is always the whole video. (Telling
+ * it the raw pixel size made it enlarge videos with fewer pixels than the screen a second time.)
+ * Used for GIFs too ([GifPlayer] draws onto the same kind of view).
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -85,26 +85,20 @@ internal fun FittedVideo(
     }
     Box(modifier.fillMaxSize().zoomable(zoom, onClick = { onTap() })) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            // The TextureView keeps the video's own resolution (capped) and is scaled down to fit,
-            // so zooming in shows the real pixels instead of a blown-up screen-sized copy.
-            val frame = frameSize ?: (if (sideways) Size(shown.height, shown.width) else shown)
-            val longest = max(frame.width, frame.height).coerceAtLeast(1f)
-            val cap = if (longest > 4096f) 4096f / longest else 1f
-            val bufW = (frame.width * cap).roundToInt().coerceAtLeast(1)
-            val bufH = (frame.height * cap).roundToInt().coerceAtLeast(1)
-            val shownW = if (sideways) bufH else bufW
-            val shownH = if (sideways) bufW else bufH
-            val fit = min(constraints.maxWidth.toFloat() / shownW, constraints.maxHeight.toFloat() / shownH)
+            // Laid out exactly at its fitted size. Zooming stays sharp: the GPU draws the video's own
+            // full-resolution frames under the zoom, it never enlarges a screen-sized copy.
+            val fit = min(constraints.maxWidth / shown.width, constraints.maxHeight / shown.height)
+            val w = (shown.width * fit).roundToInt().coerceIn(1, constraints.maxWidth.coerceAtLeast(1))
+            val h = (shown.height * fit).roundToInt().coerceIn(1, constraints.maxHeight.coerceAtLeast(1))
+            // Only on old Android does the app turn sideways frames itself.
+            val viewW = if (sideways) h else w
+            val viewH = if (sideways) w else h
             AndroidView(
                 factory = { ctx -> TextureView(ctx).also { player.setVideoTextureView(it); onTexture(it) } },
                 modifier = Modifier.align(Alignment.Center).layout { measurable, _ ->
-                    val placeable = measurable.measure(Constraints.fixed(bufW, bufH))
-                    val w = (shownW * fit).roundToInt().coerceAtLeast(1)
-                    val h = (shownH * fit).roundToInt().coerceAtLeast(1)
+                    val placeable = measurable.measure(Constraints.fixed(viewW, viewH))
                     layout(w, h) {
-                        placeable.placeWithLayer((w - bufW) / 2, (h - bufH) / 2) {
-                            scaleX = fit
-                            scaleY = fit
+                        placeable.placeWithLayer((w - viewW) / 2, (h - viewH) / 2) {
                             rotationZ = rotation.toFloat()
                             alpha = if (known) 1f else 0f
                         }

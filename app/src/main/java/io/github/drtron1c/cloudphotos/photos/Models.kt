@@ -50,6 +50,12 @@ data class Asset(
 ) {
     val isLive get() = !isVideo && liveVideo != null
 
+    /** An animated GIF: plays like a video. */
+    val isGif: Boolean
+        get() = !isVideo && (itemType.contains("gif", ignoreCase = true) ||
+            original?.fileType?.contains("gif", ignoreCase = true) == true ||
+            filename.endsWith(".gif", ignoreCase = true))
+
     /** What the iPhone shows, shares and exports: the edit if there is one, else the original. */
     val current: Version? get() = edited ?: original ?: medium
 

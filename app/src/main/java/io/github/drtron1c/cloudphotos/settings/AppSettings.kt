@@ -72,6 +72,8 @@ object Keys {
     const val MEMORY_MUSIC_NAME = "memory_music_name"
     const val PLACES_MAP = "places_map"
     const val PEOPLE_NAMES = "people_names"
+    const val MEDIA_CACHE_MB = "media_cache_mb"
+    const val MEDIA_CACHE_KEEP = "media_cache_keep"
 }
 
 /**
@@ -204,6 +206,11 @@ class AppSettings(private val prefs: SharedPreferences) {
     var memoryMusicName by str(Keys.MEMORY_MUSIC_NAME, "")
     /** Places: show the OpenStreetMap map (loads map pictures from openstreetmap.org). */
     var placesMap by bool(Keys.PLACES_MAP, false)
+
+    /** Temporary cache for videos and GIFs: size limit in MB (0 = off). */
+    var mediaCacheMb by int(Keys.MEDIA_CACHE_MB, 1024)
+    /** How long cached videos are kept: "session" (until the app closes), "day", "week" or "month". */
+    var mediaCacheKeep by str(Keys.MEDIA_CACHE_KEEP, "week")
 
     fun raw(): SharedPreferences = prefs
 

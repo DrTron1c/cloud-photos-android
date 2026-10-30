@@ -1,8 +1,6 @@
 package io.github.drtron1c.cloudphotos.ui
 
 import android.graphics.Bitmap
-import android.media.MediaDataSource
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -34,58 +31,32 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
- * The strip of frames above a video's progress bar (like iPhone): drag along it to go through the
- * video frame by frame. Frames are read on the device; streamed videos are read through the app's
- * own connection (encrypted DNS, VPN), never the system's.
+ * The strip of frames above a video's (or GIF's) progress bar, like iPhone: one picture per slot,
+ * each the exact frame at that point, shaped like the video and as many as fit across. Drag along
+ * it to go through the video frame by frame. Frames are made on the device and kept while the app
+ * runs, so showing the controls again is instant.
  */
 @Composable
 fun FrameStrip(
-    vm: MainViewModel,
-    uri: Uri,
-    sizeBytes: Long,
+    source: FrameSource,
     durationMs: Long,
     positionMs: Long,
     onScrub: (Long) -> Unit,
     onScrubEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val frames = remember(uri) { mutableStateListOf<Bitmap?>() }
-    val count = 10
-    LaunchedEffect(uri, durationMs) {
-        if (durationMs <= 0) return@LaunchedEffect
-        frames.clear()
-        repeat(count) { frames += null }
-        withContext(Dispatchers.IO) {
-            val r = MediaMetadataRetriever()
-            try {
-                if (uri.scheme == "file") r.setDataSource(uri.path) else r.setDataSource(HttpDataSource(vm.http, uri.toString(), sizeBytes))
-                for (i in 0 until count) {
-                    if (!isActive) break
-                    val t = (durationMs * (i + 0.5) / count * 1000).toLong()
-                    val b = runCatching { r.getScaledFrameAtTime(t, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 160, 160) }.getOrNull()
-                    withContext(Dispatchers.Main) { if (i < frames.size) frames[i] = b }
-                }
-            } catch (_: Throwable) {
-            } finally {
-                runCatching { r.release() }
-            }
-        }
-    }
-    DisposableEffect(uri) { onDispose { frames.clear() } }
     val scrub by rememberUpdatedState(onScrub)
     val end by rememberUpdatedState(onScrubEnd)
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Color.White.copy(alpha = 0.12f))
             .pointerInput(durationMs) {
@@ -101,9 +72,28 @@ fun FrameStrip(
                 }
             },
     ) {
+        val heightPx = constraints.maxHeight.coerceAtLeast(1)
+        val widthPx = constraints.maxWidth.coerceAtLeast(1)
+        // As many frames as fit across when each keeps the video's shape.
+        val aspect = source.aspect.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.3f, 3.5f) ?: (16f / 9f)
+        val n = ceil(widthPx / (heightPx * aspect)).toInt().coerceIn(4, 60)
+        val times = remember(n, durationMs) { List(n) { (durationMs * (it + 0.5) / n).toLong() } }
+        val pics = remember(source.key, n, durationMs) {
+            mutableStateListOf<Bitmap?>().apply { for (t in times) add(FrameCache.get(source.key, t, heightPx)) }
+        }
+        LaunchedEffect(source.key, n, durationMs) {
+            if (durationMs <= 0) return@LaunchedEffect
+            val missing = times.indices.filter { pics.getOrNull(it) == null }
+            if (missing.isEmpty()) return@LaunchedEffect
+            source.pictures(missing.map { times[it] }, heightPx) { j, b ->
+                val i = missing[j]
+                FrameCache.put(source.key, times[i], heightPx, b)
+                withContext(Dispatchers.Main) { if (i < pics.size) pics[i] = b }
+            }
+        }
         Row(Modifier.fillMaxWidth().fillMaxHeight()) {
-            for (i in 0 until count) {
-                val b = frames.getOrNull(i)
+            for (i in 0 until n) {
+                val b = pics.getOrNull(i)
                 Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black.copy(alpha = 0.3f))) {
                     if (b != null) {
                         Image(b.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().fillMaxHeight())
@@ -112,64 +102,15 @@ fun FrameStrip(
             }
         }
         // Where you are.
-        val x = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) * constraints.maxWidth else 0f
+        val x = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) * widthPx else 0f
         Box(
             Modifier
-                .offset { IntOffset(x.roundToInt() - 3, 0) }
+                .offset { IntOffset(x.roundToInt() - 3.dp.roundToPx(), 0) }
                 .width(6.dp)
                 .fillMaxHeight()
                 .border(2.dp, Color.White, RoundedCornerShape(3.dp)),
         )
     }
-}
-
-/** Lets Android's frame reader read a streamed video through the app's own HTTP client. */
-private class HttpDataSource(private val http: OkHttpClient, private val url: String, private val known: Long) : MediaDataSource() {
-    private val block = 256 * 1024
-    private val cache = object : LinkedHashMap<Long, ByteArray>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 48
-    }
-    private var total = known
-
-    override fun getSize(): Long {
-        if (total > 0) return total
-        runCatching {
-            http.newCall(Request.Builder().url(url).header("Range", "bytes=0-0").build()).execute().use { r ->
-                total = r.header("Content-Range")?.substringAfter('/')?.toLongOrNull() ?: -1
-            }
-        }
-        return total
-    }
-
-    private fun blockAt(index: Long): ByteArray? {
-        cache[index]?.let { return it }
-        val from = index * block
-        val to = from + block - 1
-        return runCatching {
-            http.newCall(Request.Builder().url(url).header("Range", "bytes=$from-$to").build()).execute().use { r ->
-                if (!r.isSuccessful) null else r.body?.bytes()
-            }
-        }.getOrNull()?.also { cache[index] = it }
-    }
-
-    override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
-        val len = getSize()
-        if (len in 1..position) return -1
-        var done = 0
-        while (done < size) {
-            val p = position + done
-            if (len > 0 && p >= len) break
-            val b = blockAt(p / block) ?: break
-            val inBlock = (p % block).toInt()
-            if (inBlock >= b.size) break
-            val n = minOf(size - done, b.size - inBlock)
-            System.arraycopy(b, inBlock, buffer, offset + done, n)
-            done += n
-        }
-        return if (done == 0) -1 else done
-    }
-
-    override fun close() { cache.clear() }
 }
 
 /** Not a real file? (Offline copies are plain files.) */

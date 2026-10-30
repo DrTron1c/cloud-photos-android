@@ -56,6 +56,8 @@ class AppGraph(context: Context) {
     @Volatile var reauthHandler: suspend () -> Boolean = { false }
     val photos = PhotosApi(http, authState) { reauthHandler() }
     val media = MediaActions(context, http)
+    /** Temporary cache for videos and GIFs (Settings › Videos). */
+    val mediaCache = io.github.drtron1c.cloudphotos.photos.MediaCache(context, settings, http)
     val offline = OfflineStore(context)
     val indexDir: File = File(context.filesDir, "index").apply { mkdirs() }
 
@@ -83,5 +85,7 @@ class AppGraph(context: Context) {
     init {
         photos.zoneName = settings.zone
         vpnGate = { vpn.gateBlocking() }
+        // Drop cached videos older than the chosen time (all of them for "until the app closes").
+        Thread { runCatching { mediaCache.trim(appStarting = true) } }.start()
     }
 }

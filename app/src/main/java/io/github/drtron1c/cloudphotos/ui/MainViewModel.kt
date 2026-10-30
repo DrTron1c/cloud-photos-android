@@ -150,6 +150,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings = graph.settings
     val imageLoader get() = graph.imageLoader
     val http get() = graph.http
+    val mediaCache get() = graph.mediaCache
     val vpn get() = graph.vpn
     val updates get() = graph.updates
     private val prefs get() = graph.prefs
@@ -2006,6 +2007,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun pinShortcut(name: String, color: Int) {
         val ok = AppIdentity.pinShortcut(getApplication(), name, color)
         if (!ok) toast("Your launcher doesn't allow adding shortcuts")
+    }
+
+    /** Space the temporary video cache uses now (read off the main thread). */
+    suspend fun mediaCacheBytes(): Long = withContext(Dispatchers.IO) { graph.mediaCache.used() }
+
+    fun clearMediaCache(done: () -> Unit = {}) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { graph.mediaCache.clear() }
+            toast("Cached videos cleared from this device")
+            done()
+        }
+    }
+
+    fun clearMediaCacheQuietly() {
+        val c = graph.mediaCache
+        Thread { runCatching { c.clear() } }.start()
+    }
+
+    /** A cache setting changed: apply it now (size limit, how long things are kept, off). */
+    fun applyMediaCache() {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { graph.mediaCache.trim() } }
     }
 
     fun clearImageCache() {

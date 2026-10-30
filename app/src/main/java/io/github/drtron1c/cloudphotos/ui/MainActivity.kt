@@ -197,4 +197,10 @@ class MainActivity : FragmentActivity(), PipHost {
             vm.onBackgrounded()
         }
     }
+
+    override fun onDestroy() {
+        // "Until the app closes": closing the app (not just rotating it) empties the video cache.
+        if (isFinishing && !isChangingConfigurations && vm.settings.mediaCacheKeep == "session") vm.clearMediaCacheQuietly()
+        super.onDestroy()
+    }
 }

@@ -14,3 +14,4 @@
 -keep class androidx.media3.** { *; }
 # The video-fit test drives the zoom library directly.
 -keep class me.saket.telephoto.** { *; }
+-keep class pl.droidsonroids.gif.** { *; }

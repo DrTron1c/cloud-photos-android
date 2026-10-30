@@ -111,6 +111,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+    implementation("androidx.media3:media3-datasource:1.5.1")
+    implementation("androidx.media3:media3-database:1.5.1")
+    // GIFs play like videos: frame-accurate decoding, so the scrub bar and frame strip work on them.
+    implementation("pl.droidsonroids.gif:android-gif-drawable:1.2.29")
     // Trimming videos on the device.
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")

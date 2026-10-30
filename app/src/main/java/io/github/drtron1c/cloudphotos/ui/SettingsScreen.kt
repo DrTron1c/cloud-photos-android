@@ -241,6 +241,23 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 Divider()
                 ToggleRow("Auto-play Live Photos", "Play the motion once when you swipe to one", s.livePhotoAutoplay) { s.livePhotoAutoplay = it }
             }
+            var mediaCacheUsed by remember { mutableStateOf(-1L) }
+            LaunchedEffect(s.mediaCacheMb, s.mediaCacheKeep, dialog) { mediaCacheUsed = vm.mediaCacheBytes() }
+            Group(
+                "Temporary cache",
+                footer = "Videos and GIFs you watch are kept for a while in this app's private storage, so watching again, scrubbing and the " +
+                    "frame strip don't download them again. No other app can read it, and Android may also clear it when space runs low.",
+            ) {
+                ValueRow("Cache videos & GIFs", MEDIA_CACHE_SIZES.firstOrNull { it.first == s.mediaCacheMb.toString() }?.second ?: "${s.mediaCacheMb} MB") { dialog = "mediacache" }
+                if (s.mediaCacheMb > 0) {
+                    Divider()
+                    ValueRow("Keep them", MEDIA_CACHE_KEEPS.firstOrNull { it.first == s.mediaCacheKeep }?.second ?: s.mediaCacheKeep) { dialog = "mediakeep" }
+                }
+                Divider()
+                ValueRow("Space used", if (mediaCacheUsed < 0) "…" else formatBytes(mediaCacheUsed).ifEmpty { "0 KB" }, onClick = null)
+                Divider()
+                ActionRow("Clear cached videos", p.accent) { vm.clearMediaCache { mediaCacheUsed = 0L } }
+            }
 
             // ---------- Slideshow ----------
             Group("Slideshow") {
@@ -552,6 +569,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     if (showShortcutList) ShortcutsDialog { showShortcutList = false }
     when (dialog) {
+        "mediacache" -> ChoiceDialog(
+            title = "Cache videos & GIFs",
+            options = MEDIA_CACHE_SIZES,
+            selected = s.mediaCacheMb.toString(),
+            footer = "The most space cached videos may take. The least recently watched go first.",
+            onDismiss = { dialog = null },
+        ) { s.mediaCacheMb = it.toInt(); vm.applyMediaCache(); dialog = null }
+        "mediakeep" -> ChoiceDialog(
+            title = "Keep cached videos",
+            options = MEDIA_CACHE_KEEPS,
+            selected = s.mediaCacheKeep,
+            onDismiss = { dialog = null },
+        ) { s.mediaCacheKeep = it; vm.applyMediaCache(); dialog = null }
         "dns" -> ChoiceDialog(
             title = "Encrypted DNS",
             options = DNS_OPTIONS,
@@ -600,6 +630,22 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         )
     }
 }
+
+private val MEDIA_CACHE_SIZES = listOf(
+    "0" to "Off",
+    "512" to "Up to 512 MB",
+    "1024" to "Up to 1 GB",
+    "2048" to "Up to 2 GB",
+    "5120" to "Up to 5 GB",
+    "10240" to "Up to 10 GB",
+)
+
+private val MEDIA_CACHE_KEEPS = listOf(
+    "session" to "Until the app closes",
+    "day" to "1 day",
+    "week" to "1 week",
+    "month" to "30 days",
+)
 
 /** Pick one option from a short list. */
 @Composable

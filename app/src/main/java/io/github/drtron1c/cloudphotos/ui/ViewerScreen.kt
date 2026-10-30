@@ -151,14 +151,25 @@ import kotlin.math.roundToInt
 /** How far photos and videos zoom (× the fitted size). Full-resolution detail is loaded as you go in. */
 const val MAX_ZOOM = 16f
 
-/** Plays local (offline) files and iCloud links through the same encrypted-DNS client. */
+/**
+ * Plays local (offline) files and iCloud links through the same encrypted-DNS client; streamed
+ * videos go through the temporary cache ([cache], keyed by [cacheKey]) when it's on.
+ */
 @OptIn(UnstableApi::class)
-fun newPlayer(context: android.content.Context, http: OkHttpClient, uri: Uri, loop: Boolean = false, muted: Boolean = false): ExoPlayer =
+fun newPlayer(
+    context: android.content.Context,
+    http: OkHttpClient,
+    uri: Uri,
+    loop: Boolean = false,
+    muted: Boolean = false,
+    cache: io.github.drtron1c.cloudphotos.photos.MediaCache? = null,
+    cacheKey: String? = null,
+): ExoPlayer =
     ExoPlayer.Builder(context)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(cache?.factoryFor(uri) ?: DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))))
         .build()
         .apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(MediaItem.Builder().setUri(uri).apply { if (cacheKey != null) setCustomCacheKey(cacheKey) }.build())
             repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             volume = if (muted) 0f else 1f
             prepare()
@@ -262,7 +273,7 @@ fun ViewerScreen(
             e.ctrl && code == KeyEvent.KEYCODE_ENTER -> { vm.open(Route.Slideshow(list.key, pager.currentPage)); true }
             !e.plain -> false
             code == KeyEvent.KEYCODE_SPACE || code == KeyEvent.KEYCODE_P || code == KeyEvent.KEYCODE_M -> {
-                if (a.isVideo) videoKey?.invoke(code) ?: false
+                if (a.isVideo || a.isGif) videoKey?.invoke(code) ?: false
                 else if (code == KeyEvent.KEYCODE_SPACE) { if (a.isLive) liveTrigger++ else chrome = !chrome; true } else false
             }
             code == KeyEvent.KEYCODE_F || code == KeyEvent.KEYCODE_PERIOD -> { if (editable) vm.toggleFavorite(a); true }
@@ -320,7 +331,7 @@ fun ViewerScreen(
                     asset == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
                     }
-                    asset.isVideo -> VideoPage(
+                    asset.isVideo || asset.isGif -> VideoPage(
                         vm = vm,
                         asset = asset,
                         active = pager.settledPage == page && !covered,
@@ -849,7 +860,7 @@ private fun LivePlayback(vm: MainViewModel, motion: Version, trigger: Int) {
     var playing by remember(trigger) { mutableStateOf(true) }
     if (!playing) return
     val player = remember(trigger) {
-        newPlayer(context, vm.http, vm.mediaUri(motion), muted = vm.settings.startMuted).apply { playWhenReady = true }
+        newPlayer(context, vm.http, vm.mediaUri(motion), muted = vm.settings.startMuted, cache = vm.mediaCache, cacheKey = motion.checksum).apply { playWhenReady = true }
     }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -894,8 +905,10 @@ private fun VideoPage(
     val p = LocalPalette.current
     val s = vm.settings
     val context = LocalContext.current
-    // A copy kept offline plays from the device; otherwise stream from iCloud.
-    val video = asset.offlineVideo?.takeIf { vm.mediaUri(it).scheme == "file" } ?: asset.playbackVideo
+    // GIFs play like videos (their original file). A video copy kept offline plays from the
+    // device; otherwise it streams from iCloud (through the temporary cache).
+    val gif = asset.isGif
+    val video = if (gif) asset.original else asset.offlineVideo?.takeIf { vm.mediaUri(it).scheme == "file" } ?: asset.playbackVideo
     Box(Modifier.fillMaxSize()) {
         val poster = asset.medium ?: asset.thumbnail
         if (poster != null) {
@@ -915,11 +928,21 @@ private fun VideoPage(
             return@Box
         }
         if (active) {
-            val player = remember(asset.id) {
-                newPlayer(context, vm.http, vm.mediaUri(video), loop = s.loopVideos, muted = s.startMuted)
-                    .apply { playWhenReady = s.autoplayVideos }
+            val player: Player = remember(asset.id) {
+                if (gif) {
+                    val uri = vm.mediaUri(video)
+                    GifPlayer(video.checksum) { vm.mediaCache.readAll(uri, video.checksum) }
+                        .apply { playWhenReady = true; prepare() }
+                } else {
+                    newPlayer(context, vm.http, vm.mediaUri(video), loop = s.loopVideos, muted = s.startMuted, cache = vm.mediaCache, cacheKey = video.checksum)
+                        .apply { playWhenReady = s.autoplayVideos }
+                }
             }
             DisposableEffect(player) { onDispose { player.release() } }
+            // The frame strip and frame-by-frame buttons.
+            val frames: FrameSource = remember(player) {
+                player as? GifPlayer ?: VideoFrames(player as ExoPlayer, vm.mediaUri(video), video.checksum, video.size, vm.mediaCache)
+            }
             // The picture's shape on screen, once the decoder reports it (used for picture-in-picture).
             var videoSize by remember(asset.id) {
                 mutableStateOf(if (asset.width > 0 && asset.height > 0) Size(asset.width.toFloat(), asset.height.toFloat()) else Size(16f, 9f))
@@ -970,16 +993,16 @@ private fun VideoPage(
                 vm = vm,
                 player = player,
                 visible = chrome,
-                startMuted = s.startMuted,
-                canTrim = editable && vm.canUpload,
+                startMuted = s.startMuted && !gif,
+                canTrim = editable && vm.canUpload && !gif,
                 onTrim = onTrim,
                 onSaveFrame = { toLibrary ->
                     val bmp = texture?.bitmap
                     if (bmp == null) vm.toast("The video isn't showing yet") else vm.saveFrame(asset, bmp, player.currentPosition, toLibrary)
                 },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = controlsBottom + 10.dp),
-                videoUri = vm.mediaUri(video),
-                videoBytes = video.size,
+                frames = frames,
+                hasSound = !gif,
             )
         } else {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) })
@@ -1010,15 +1033,15 @@ private fun speedLabel(x: Float) = (if (x == x.toInt().toFloat()) x.toInt().toSt
 @Composable
 private fun VideoControls(
     vm: MainViewModel,
-    player: ExoPlayer,
+    player: Player,
     visible: Boolean,
     startMuted: Boolean,
     canTrim: Boolean,
     onTrim: () -> Unit,
     onSaveFrame: (toLibrary: Boolean) -> Unit,
     modifier: Modifier,
-    videoUri: Uri? = null,
-    videoBytes: Long = 0L,
+    frames: FrameSource? = null,
+    hasSound: Boolean = true,
 ) {
     var speed by remember { mutableFloatStateOf(1f) }
     var speedMenu by remember { mutableStateOf(false) }
@@ -1036,7 +1059,7 @@ private fun VideoControls(
         if (scrub < 0f) {
             resumeAfter = player.playWhenReady
             player.playWhenReady = false
-            player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+            frames?.exact()
         }
         scrub = if (duration > 0) (ms.toFloat() / duration).coerceIn(0f, 1f) else 0f
         val now = System.currentTimeMillis()
@@ -1048,11 +1071,11 @@ private fun VideoControls(
         if (resumeAfter) player.playWhenReady = true
         resumeAfter = false
     }
-    fun step(frames: Int) {
-        val fps = player.videoFormat?.frameRate?.takeIf { it > 0f } ?: 30f
+    fun step(by: Int) {
         player.playWhenReady = false
-        player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
-        player.seekTo((player.currentPosition + (frames * 1000f / fps).toLong()).coerceIn(0L, duration.coerceAtLeast(0L)))
+        frames?.exact()
+        val from = player.currentPosition
+        player.seekTo(frames?.step(from, by, duration) ?: (from + by * 33L).coerceIn(0L, duration.coerceAtLeast(0L)))
     }
     LaunchedEffect(player) {
         while (true) {
@@ -1079,13 +1102,13 @@ private fun VideoControls(
                     .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
-            if (videoUri != null && duration > 0) {
+            if (frames != null && duration > 0) {
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 6.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!playing) {
                         IconButton(onClick = { step(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous frame", tint = Color.White) }
                     }
                     FrameStrip(
-                        vm, videoUri, videoBytes, duration,
+                        frames, duration,
                         positionMs = if (scrub >= 0) (scrub * duration).toLong() else position,
                         onScrub = { scrubTo(it) }, onScrubEnd = { scrubEnd() },
                         modifier = Modifier.weight(1f),
@@ -1127,8 +1150,10 @@ private fun VideoControls(
                         }
                     }
                 }
-                IconButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f }) {
-                    Icon(if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, "Mute", tint = Color.White)
+                if (hasSound) {
+                    IconButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f }) {
+                        Icon(if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, "Mute", tint = Color.White)
+                    }
                 }
                 Box {
                     IconButton(onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, "More", tint = Color.White) }

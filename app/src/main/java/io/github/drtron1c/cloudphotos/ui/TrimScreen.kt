@@ -59,7 +59,7 @@ fun TrimScreen(vm: MainViewModel, asset: Asset, onClose: () -> Unit) {
         LaunchedEffect(Unit) { vm.toast("This video can't be trimmed"); onClose() }
         return
     }
-    val player = remember { newPlayer(context, vm.http, vm.mediaUri(video)).apply { playWhenReady = true } }
+    val player = remember { newPlayer(context, vm.http, vm.mediaUri(video), cache = vm.mediaCache, cacheKey = video.checksum).apply { playWhenReady = true } }
     var duration by remember { mutableLongStateOf(((asset.durationSec ?: 0.0) * 1000).toLong()) }
     var range by remember { mutableStateOf(0f..1f) }
     var position by remember { mutableLongStateOf(0L) }

@@ -721,9 +721,9 @@ private fun GridCell(
             }
             if (!dense) {
                 val shadow = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 4f))
-                if (asset.isVideo && s.showDurations) {
+                if ((asset.isVideo || asset.isGif) && s.showDurations) {
                     Text(
-                        formatDuration(asset.durationSec).ifEmpty { "▶" },
+                        if (asset.isGif) "GIF" else formatDuration(asset.durationSec).ifEmpty { "▶" },
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,

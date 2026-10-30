@@ -67,66 +67,14 @@ class VideoFitOnDeviceTest {
     val rule = createAndroidComposeRule<ComponentActivity>()
 
     private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-    private val dir = File(ctx.cacheDir, "test-fit").apply { mkdirs() }
-    private val tag = "CompanionTest"
-
-    /** Blue inside, a yellow band round the edge (so a cropped edge is easy to spot). */
-    private fun picture(w: Int, h: Int): File {
-        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val c = Canvas(b)
-        c.drawColor(Color.rgb(250, 220, 0))
-        val band = min(w, h) * 0.14f
-        c.drawRect(band, band, w - band, h - band, Paint().apply { color = Color.rgb(30, 120, 255) })
-        return File(dir, "picture-${w}x$h.png").also { f -> f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
-    }
-
-    private fun export(item: EditedMediaItem, out: File) = runBlocking(Dispatchers.Main) {
-        out.delete()
-        suspendCancellableCoroutine<Unit> { cont ->
-            Transformer.Builder(ctx).addListener(object : Transformer.Listener {
-                override fun onCompleted(composition: Composition, exportResult: ExportResult) { cont.resume(Unit) }
-                override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) { cont.resumeWithException(exportException) }
-            }).build().start(item, out.path)
-        }
-    }
-
-    /** A 2-second test video; [rotated] stores landscape pixels with a 90° flag, like phone videos. */
-    private fun video(w: Int, h: Int, rotated: Boolean = false): File {
-        val plain = File(dir, "video-${w}x$h.mp4")
-        export(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(picture(w, h)))).setDurationUs(2_000_000).setFrameRate(30).build(), plain)
-        if (!rotated) return plain
-        val out = File(dir, "video-${w}x$h-rotated.mp4")
-        val turn: Effect = ScaleAndRotateTransformation.Builder().setRotationDegrees(90f).build()
-        export(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(plain))).setEffects(Effects(listOf(), listOf(turn))).build(), out)
-        return out
-    }
-
-    /** The picture's shape as it should appear (after the file's rotation flag). */
-    private fun shape(f: File): Pair<Int, Int> {
-        val r = MediaMetadataRetriever()
-        r.setDataSource(f.path)
-        val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toInt()
-        val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toInt()
-        val turn = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-        r.release()
-        Log.i(tag, "FIT file ${f.name} stored ${w}x$h rotation $turn")
-        return if (turn % 180 != 0) h to w else w to h
-    }
-
-    private fun save(bmp: Bitmap, name: String) {
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, "image/png")
-        }
-        runCatching {
-            val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
-            ctx.contentResolver.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        }
-    }
-
-    private fun bright(c: Int) = max(Color.red(c), max(Color.green(c), Color.blue(c))) > 70
-    private fun yellow(c: Int) = Color.red(c) > 160 && Color.green(c) > 140 && Color.blue(c) < 120
-    private fun blue(c: Int) = Color.blue(c) > 160 && Color.red(c) < 130
+    private val kit = VideoTestKit(ctx, "test-fit")
+    private val tag = kit.tag
+    private fun video(w: Int, h: Int, rotated: Boolean = false) = kit.video(w, h, rotated)
+    private fun shape(f: File) = kit.shape(f)
+    private fun save(bmp: Bitmap, name: String) = kit.save(bmp, name)
+    private fun bounds(b: Bitmap) = VideoTestKit.bounds(b)
+    private fun yellow(c: Int) = VideoTestKit.yellow(c)
+    private fun blue(c: Int) = VideoTestKit.blue(c)
 
     /** Plays [file] inside a [boxW]×[boxH] pixel space and checks the whole picture is on screen. */
     private fun check(name: String, file: File, boxW: Int, boxH: Int) {
@@ -196,25 +144,6 @@ class VideoFitOnDeviceTest {
         assertTrue("$name: middle missing", blue(b.getPixel(midX, midY)))
     }
 
-    /** The drawn picture's bounds within the black space: left, top, right, bottom. */
-    private fun bounds(b: Bitmap): List<Int>? {
-        var l = Int.MAX_VALUE
-        var t = Int.MAX_VALUE
-        var r = -1
-        var btm = -1
-        val row = IntArray(b.width)
-        for (y in 0 until b.height) {
-            b.getPixels(row, 0, b.width, 0, y, b.width, 1)
-            for (x in row.indices) if (bright(row[x])) {
-                if (x < l) l = x
-                if (x > r) r = x
-                if (y < t) t = y
-                if (y > btm) btm = y
-            }
-        }
-        return if (r < 0) null else listOf(l, t, r, btm)
-    }
-
     /** The space to test in: a share of the emulator's screen, landscape or portrait. */
     private fun space(wide: Float, tall: Float): Pair<Int, Int> {
         val m = ctx.resources.displayMetrics
@@ -250,5 +179,16 @@ class VideoFitOnDeviceTest {
     fun largeVideoBiggerThanTheSpace() {
         val (w, h) = space(1f, 0.4f)
         check("large", video(1280, 720), w, h)
+    }
+
+    @Test
+    fun videoBiggerThanTheSpaceIsShrunkToFitNotCropped() {
+        // The usual case on a tablet: a phone video with more pixels than the space it's shown in.
+        check("downscale-landscape", video(512, 288), 300, 200)
+    }
+
+    @Test
+    fun rotatedPhoneVideoBiggerThanALandscapeSpace() {
+        check("downscale-rotated", video(512, 288, rotated = true), 360, 200)
     }
 }
